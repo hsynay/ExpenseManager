@@ -1,0 +1,157 @@
+body {
+    background-color: #f8f9fa;
+    padding-top: 100px; /* Fixed navbar için boşluk */
+}
+
+.card {
+    border: none;
+    border-radius: 1rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease-in-out;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+.navbar {
+    background-color: #343a40 !important;
+}
+
+.navbar .nav-link, .navbar-brand, .navbar span {
+    color: white !important;
+}
+
+.navbar .btn-danger {
+    margin-left: 1rem;
+}
+
+/* Dashboard specific styles */
+.filter-card {
+    background: white;
+    padding: 2rem;
+    margin-bottom: 2rem;
+}
+
+.btn-filter {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    border-radius: 0.5rem;
+    font-weight: 600;
+}
+
+/* Table styles */
+.table {
+    background-color: white;
+    border-radius: 1rem;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.table thead th {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    font-weight: 600;
+}
+
+.table thead th.sortable a {
+    color: white;
+    text-decoration: none;
+}
+
+.table thead th.sortable a:hover {
+    color: #e9ecef;
+}
+
+.table-danger {
+    --bs-table-bg: #f8d7da;
+    --bs-table-color: #58151a;
+}
+
+/* Form styles */
+.form-control, .form-select {
+    border-radius: 0.5rem;
+    border: 1px solid #dee2e6;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+.btn-save {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    border: none;
+    font-weight: 600;
+}
+
+.btn-cancel {
+    background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+    border: none;
+    font-weight: 600;
+}
+
+/* Report card header */
+.report-card-header {
+    border-top-left-radius: 1rem;
+    border-top-right-radius: 1rem;
+}
+
+/* Customer card animation */
+.customer-card {
+    transition: all 0.3s ease-in-out;
+}
+
+/* Print styles */
+@media print {
+    body, .page {
+        margin: 0;
+        box-shadow: none;
+        border: none;
+        background: white;
+    }
+    .page {
+        width: auto;
+        min-height: auto;
+        padding: 1cm;
+    }
+    .summary-box {
+        background-color: #f8f9fa !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+
+/* Print statement specific styles */
+.page {
+    width: 21cm;
+    min-height: 29.7cm;
+    padding: 2cm;
+    margin: 1cm auto;
+    border: 1px #D3D3D3 solid;
+    border-radius: 5px;
+    background: white;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+}
+
+.company-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 2px solid #dee2e6;
+    padding-bottom: 1rem;
+    margin-bottom: 2rem;
+}
+
+.company-header h1 {
+    color: #343a40;
+}
+
+.summary-box {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: .5rem;
+    padding: 1rem;
+}

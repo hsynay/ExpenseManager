@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>Daireleri Tanımla</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="container py-4">
+  <h3 class="mb-4">Daireleri Tanımla</h3>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, msg in messages %}
+      <div class="alert alert-{{category}}">{{msg}}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <form method="POST">
+    <div id="flat-entries">
+      <div class="row mb-3 flat-entry">
+        <div class="col-md-3">
+          <label class="form-label">Daire No</label>
+          <input type="number" name="flat_no[]" class="form-control" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Kat</label>
+          <input type="number" name="floor[]" class="form-control" required>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Oda Tipi</label>
+          <input type="text" name="room_type[]" class="form-control" placeholder="örneğin 2+1" required>
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+          <button type="button" class="btn btn-danger remove-flat">Sil</button>
+        </div>
+      </div>
+    </div>
+
+    <button type="button" id="add-flat" class="btn btn-secondary mb-3">Yeni Daire Ekle</button>
+    <br>
+    <button type="submit" class="btn btn-primary">Tüm Daireleri Kaydet</button>
+  </form>
+
+  <script>
+    document.getElementById('add-flat').addEventListener('click', function () {
+      const newEntry = document.querySelector('.flat-entry').cloneNode(true);
+      newEntry.querySelectorAll('input').forEach(input => input.value = '');
+      document.getElementById('flat-entries').appendChild(newEntry);
+    });
+
+    document.addEventListener('click', function (e) {
+      if (e.target.classList.contains('remove-flat')) {
+        const entries = document.querySelectorAll('.flat-entry');
+        if (entries.length > 1) {
+          e.target.closest('.flat-entry').remove();
+        }
+      }
+    });
+  </script>
+</body>
+</html>

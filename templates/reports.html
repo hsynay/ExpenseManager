@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Proje Finansal Raporları</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        body { background-color: #f8f9fa; }
+        .card { border: none; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); }
+        .navbar { background-color: #343a40 !important; }
+        .navbar .nav-link, .navbar-brand, .navbar span { color: white !important; }
+        .report-card-header {
+            border-top-left-radius: 1rem;
+            border-top-right-radius: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar navbar-expand-lg navbar-dark fixed-top shadow">
+        <div class="container">
+          <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}">
+            <i class="fa-solid fa-building"></i> KONAK
+          </a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+          </button>
+          <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+              <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('dashboard') }}">
+                  <i class="fa-solid fa-home me-1"></i>Ana Sayfa
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('new_payment') }}">
+                  <i class="fa-solid fa-plus me-1"></i>Yeni Ödeme
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link active" href="{{ url_for('reports') }}">
+                  <i class="fa-solid fa-chart-line me-1"></i>Raporlar
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('debt_status') }}">
+                  <i class="fa-solid fa-exclamation-triangle me-1"></i>Borçlar
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('list_payments') }}">
+                  <i class="fa-solid fa-list me-1"></i>Tüm Ödemeler
+                </a>
+              </li>
+            </ul>
+            <div class="d-flex align-items-center">
+              <span class="me-3">
+                <i class="fa-solid fa-user me-1"></i>{{ user_name }}
+              </span>
+              <a href="{{ url_for('logout') }}" class="btn btn-danger btn-sm">
+                <i class="fa-solid fa-sign-out-alt me-1"></i>Çıkış
+              </a>
+            </div>
+          </div>
+        </div>
+    </nav>
+
+    <div class="container my-5 pt-5">
+        {% extends "base.html" %}
+
+        {% block title %}Raporlar - KONAK İnşaat{% endblock %}
+
+        {% block content %}
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="fw-bold">
+                <i class="fa-solid fa-chart-pie me-2 text-primary"></i> Proje Finansal Raporları
+            </h2>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">
+                <i class="fa-solid fa-arrow-left me-1"></i>Ana Sayfaya Dön
+            </a>
+        </div>
+
+        <div class="row g-4">
+            {% if not project_summaries %}
+                <div class="col-12">
+                    <div class="card text-center p-5">
+                        <i class="fa-solid fa-folder-open fa-3x text-muted mb-3"></i>
+                        <p class="h5 text-muted">Raporlanacak proje bulunamadı.</p>
+                    </div>
+                </div>
+            {% endif %}
+
+            {% for summary in project_summaries %}
+            <div class="col-lg-6">
+                {% if summary.project_type == 'normal' %}
+                    <div class="card h-100">
+                        <div class="card-header report-card-header bg-primary text-white">
+                            <h5 class="mb-0 fw-bold"><i class="fa-solid fa-building me-2"></i>{{ summary.project_name }} (Normal)</h5>
+                        </div>
+                        <div class="card-body p-4">
+                            <h6 class="text-muted">Gelir Gerçekleşme Durumu</h6>
+                            <p class="h4 fw-bold">{{ "%.2f"|format(summary.collected_revenue) }} ₺ <span class="fs-6 text-muted">/ {{ "%.2f"|format(summary.planned_revenue) }} ₺</span></p>
+                            <div class="progress" style="height: 20px;">
+                                <div class="progress-bar fw-bold" role="progressbar" style="width: {{ summary.progress_percentage }}%;" aria-valuenow="{{ summary.progress_percentage }}" aria-valuemin="0" aria-valuemax="100">{{ "%.1f"|format(summary.progress_percentage) }}%</div>
+                            </div>
+                            <hr>
+                            <ul class="list-group list-group-flush">
+                                <li class="list-group-item d-flex justify-content-between px-0"><span><i class="fa-solid fa-hourglass-half text-warning me-2"></i>Kalan Alacak:</span> <strong class="text-warning">{{ "%.2f"|format(summary.outstanding_debt) }} ₺</strong></li>
+                                <li class="list-group-item d-flex justify-content-between px-0"><span><i class="fa-solid fa-arrow-down text-danger me-2"></i>Toplam Gider:</span> <strong>{{ "%.2f"|format(summary.total_expenses) }} ₺</strong></li>
+                                <li class="list-group-item d-flex justify-content-between bg-light mt-2 rounded-2 px-2"><span><i class="fa-solid fa-wallet text-success me-2"></i>Net Nakit Durumu:</span> <strong class="h5 {% if summary.net_cash_flow < 0 %}text-danger{% else %}text-success{% endif %} mb-0">{{ "%.2f"|format(summary.net_cash_flow) }} ₺</strong></li>
+                            </ul>
+                        </div>
+                    </div>
+                {% else %}
+                    <div class="card h-100">
+                        <div class="card-header report-card-header bg-success text-white">
+                             <h5 class="mb-0 fw-bold"><i class="fa-solid fa-users me-2"></i>{{ summary.project_name }} (Kooperatif)</h5>
+                        </div>
+                         <div class="card-body p-4 d-flex flex-column justify-content-center">
+                             <ul class="list-group list-group-flush">
+                                <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                    <div><i class="fa-solid fa-arrow-up text-primary me-2"></i>Üye Ödemeleri Toplamı</div>
+                                    <span class="badge bg-primary rounded-pill fs-6">{{ "%.2f"|format(summary.member_contributions) }} ₺</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                    <div><i class="fa-solid fa-arrow-down text-danger me-2"></i>Proje Giderleri Toplamı</div>
+                                    <span class="badge bg-danger rounded-pill fs-6">{{ "%.2f"|format(summary.total_expenses) }} ₺</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center bg-light mt-2 rounded-2 px-2">
+                                    <div class="fw-bold"><i class="fa-solid fa-vault text-success me-2"></i>Kasa Bakiyesi</div>
+                                    <span class="badge {% if summary.cash_balance < 0 %}bg-danger{% else %}bg-success{% endif %} rounded-pill fs-5">{{ "%.2f"|format(summary.cash_balance) }} ₺</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

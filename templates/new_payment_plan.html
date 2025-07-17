@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Manuel Ödeme Planı Oluştur</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        body { background-color: #f8f9fa; }
+        .card { border: none; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); }
+        .navbar { background-color: #343a40 !important; }
+        .navbar .nav-link, .navbar-brand, .navbar span { color: white !important; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark fixed-top shadow">
+        <div class="container">
+      <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}">
+        <i class="fa-solid fa-building"></i> KONAK
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav me-auto">
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('dashboard') }}">
+              <i class="fa-solid fa-home me-1"></i>Ana Sayfa
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('new_payment') }}">
+              <i class="fa-solid fa-plus me-1"></i>Yeni Ödeme
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('reports') }}">
+              <i class="fa-solid fa-chart-line me-1"></i>Raporlar
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('debt_status') }}">
+              <i class="fa-solid fa-exclamation-triangle me-1"></i>Borçlar
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('list_payments') }}">
+              <i class="fa-solid fa-list me-1"></i>Tüm Ödemeler
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('new_project') }}">
+              <i class="fa-solid fa-users me-1"></i>Yeni Proje
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('assign_flat_owner') }}">
+              <i class="fa-solid fa-briefcase me-1"></i>Daire Atama
+            </a>
+          </li>
+     </ul>
+     <div class="d-flex align-items-center">
+       <span class="me-3">
+         <i class="fa-solid fa-user me-1"></i>{{ session.user_name }}
+       </span>
+       <a href="{{ url_for('logout') }}" class="btn btn-danger btn-sm">
+         <i class="fa-solid fa-sign-out-alt me-1"></i>Çıkış
+       </a>
+     </div>
+   </div>
+ </div>
+    </nav>
+
+    <div class="container my-5 pt-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-9">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 class="fw-bold mb-0">
+                           <i class="fa-solid fa-calendar-alt me-2"></i> Manuel Ödeme Planı Oluştur
+                        </h4>
+                    </div>
+                    <div class="card-body p-4">
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                          {% if messages %}
+                            {% for category, message in messages %}
+                              <div class="alert alert-{{ category }}">{{ message }}</div>
+                            {% endfor %}
+                          {% endif %}
+                        {% endwith %}
+
+                        <form method="POST" action="{{ url_for('new_payment_plan') }}">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="project_id" class="form-label">Proje Seçin (*)</label>
+                                    <select class="form-select" id="project_id" name="project_id" required>
+                                        <option value="" selected disabled>Lütfen bir proje seçin...</option>
+                                        {% for project in projects %}
+                                        <option value="{{ project[0] }}">{{ project[1] }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="flat_id" class="form-label">Daire Seçin (*)</label>
+                                    <select class="form-select" id="flat_id" name="flat_id" required disabled>
+                                        <option value="">Önce proje seçmelisiniz...</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <hr>
+                            
+                            <h5 class="mb-3">Taksitleri Girin</h5>
+                            <div id="installments-container">
+                                </div>
+                            <button type="button" id="add-installment-btn" class="btn btn-outline-success mt-2">
+                                <i class="fa-solid fa-plus me-1"></i> Taksit Ekle
+                            </button>
+                           
+                            <div class="d-flex justify-content-end mt-4">
+                                <a href="{{ url_for('dashboard') }}" class="btn btn-secondary me-2">
+                                    <i class="fa-solid fa-times me-1"></i>İptal
+                                </a>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fa-solid fa-save me-1"></i>Planı Kaydet
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // === GÜNCELLENEN BÖLÜM: Projeye göre daire getirme scripti ===
+        document.getElementById('project_id').addEventListener('change', function() {
+            const projectId = this.value;
+            const flatSelect = document.getElementById('flat_id');
+            
+            flatSelect.innerHTML = '<option value="">Yükleniyor...</option>';
+            flatSelect.disabled = true;
+
+            if (!projectId) {
+                flatSelect.innerHTML = '<option value="">Önce proje seçmelisiniz...</option>';
+                return;
+            }
+
+            fetch(`/api/project/${projectId}/flats`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        flatSelect.innerHTML = `<option value="">Hata: ${data.error}</option>`;
+                        return;
+                    }
+                    
+                    flatSelect.innerHTML = '<option value="" selected disabled>Lütfen bir daire seçin...</option>';
+                    if (data.length === 0) {
+                         flatSelect.innerHTML = '<option value="">Bu projede sahibi atanmış daire bulunamadı.</option>';
+                         return;
+                    }
+
+                    data.forEach(flat => {
+                        const option = document.createElement('option');
+                        option.value = flat.id;
+                        option.textContent = flat.text;
+                        flatSelect.appendChild(option);
+                    });
+                    flatSelect.disabled = false;
+                })
+                .catch(error => {
+                    console.error('Hata:', error);
+                    flatSelect.innerHTML = '<option value="">Daireler yüklenemedi.</option>';
+                });
+        });
+
+        // Dinamik taksit satırı ekleme/çıkarma scripti
+        const container = document.getElementById('installments-container');
+        const addBtn = document.getElementById('add-installment-btn');
+
+        let installmentCounter = 0;
+
+        function addInstallmentRow() {
+            installmentCounter++;
+            const newRow = document.createElement('div');
+            newRow.classList.add('row', 'mb-2', 'align-items-center', 'installment-row');
+            newRow.innerHTML = `
+                <div class="col-md-5">
+                    <label class="form-label-sm">Vade Tarihi</label>
+                    <input type="date" name="due_date[]" class="form-control" required>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label-sm">Tutar (₺)</label>
+                    <input type="number" step="0.01" name="amount[]" class="form-control" required>
+                </div>
+                <div class="col-md-2 text-end">
+                    <button type="button" class="btn btn-danger btn-sm mt-4 remove-btn">
+                        <i class="fa-solid fa-trash-alt"></i>
+                    </button>
+                </div>
+            `;
+            container.appendChild(newRow);
+        }
+
+        addBtn.addEventListener('click', addInstallmentRow);
+
+        container.addEventListener('click', function(e) {
+            if (e.target && (e.target.matches('.remove-btn') || e.target.closest('.remove-btn'))) {
+                const rowToRemove = e.target.closest('.installment-row');
+                container.removeChild(rowToRemove);
+            }
+        });
+        
+        // Sayfa ilk açıldığında başlangıç olarak bir taksit satırı ekleyelim
+        addInstallmentRow();
+    </script>
+</body>
+</html>
