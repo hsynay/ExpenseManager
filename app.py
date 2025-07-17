@@ -1,0 +1,1003 @@
+# --------------------
+# önce yeni proje oluştur(her projede kat, daire bilgileri girilecek)
+# eğer proje türü kooperatif ise bu kooperatif proje türü için sadece daire sahiplerinin ödedikleri ücretler ve kooperatifin giderleri görünecek
+# veritabanında her projenin giderleri ayrı bir tabloda tutalacak ve daire sahiplerinin ödedikleri ücretlerin gösteren sayfanın altında farklı bir tabloda görünecek
+# eğer proje türü normal ise(kooperatif değilse) daire sahiplerini için ayrı bir sayfadan proje ve isim seçilerek bir ödeme planı girilir   
+# ve o kişi her ödeme yaptığında ödeme planından borcu düşülecek, eğer ödeme yapmazsa ödeme planı sayfasında kırmızı renk ile gösterilecek
+# her proje türü için giderler sayfası olacak ve bu sayfa tüm ödemeler sayfasının altında görünecek
+# giderleri eklemek için yeni ödeme sayfası gibi bir sayfadan ekleme yapılacak
+# her müşteri her daire ve her proje için toplam borç, kalan borç ödenecek borç, ödenmeyen borç gibi bilgiler bir tabloda gösterilecek
+# filtreleme yapılarak daha detaylı analiz yapıılabilecek
+# ana sayfada grafikler vb gösterilecek 
+# 
+# projeler içinde bloklar olabilir 
+# ödeme ekleme, ödeme planı oluşturma vs. tüm ilemlerde daire seçerken proje seçtikten sonra sadece daire kat ve daire nosu gösterilerek seçim yapılsın
+# veri ekleme yapılan tüm sayfalrda silme ve düzenleme butonları eklensin
+#
+# --------------------
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify # jsonify import edildiğinden emin olun
+from dateutil.relativedelta import relativedelta # Tarih hesaplamaları için
+from flask import Flask, render_template, request, redirect, url_for, session, flash
+from db import get_connection
+from werkzeug.security import generate_password_hash, check_password_hash
+from parser import parse_whatsapp_message
+import os
+from datetime import datetime
+from itertools import groupby
+from datetime import date
+
+app = Flask(__name__)
+app.secret_key = os.urandom(24)  # Oturum verisi için gizli anahtar
+
+# --------------------
+# YARDIMCI FONKSİYONLAR
+# --------------------
+
+def get_user_by_email(email):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, email, password_hash, full_name FROM users WHERE email = %s", (email,))
+    user = cur.fetchone()
+    cur.close()
+    conn.close()
+    return user  # (id, email, password_hash, full_name) veya None
+
+# --------------------
+# ROUTELAR
+# --------------------
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        user = get_user_by_email(email)
+        if user and check_password_hash(user[2], password):
+            session['user_id'] = user[0]
+            session['user_name'] = user[3]
+            return redirect(url_for('dashboard'))
+        else:
+            flash('E-posta veya şifre hatalı.', 'danger')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+@app.route('/project/new', methods=['GET', 'POST'])
+def new_project():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        name = request.form['name']
+        address = request.form['address']
+        project_type = request.form['project_type']
+        floors = request.form['floors']
+        flats = request.form['flats']
+
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO projects (name, address, project_type, total_floors, total_flats)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        """, (name, address, project_type, floors, flats))
+        project_id = cur.fetchone()[0]  # Proje ID'yi al
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash('Proje başarıyla eklendi. Şimdi daireleri tanımlayabilirsiniz.', 'success')
+        return redirect(url_for('add_flats', project_id=project_id))  # <--- Buraya yönlendir
+
+    return render_template('project_new.html')
+
+
+
+@app.route('/project/<int:project_id>/flats', methods=['GET', 'POST'])
+def add_flats(project_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        flat_nos = request.form.getlist('flat_no[]')
+        floors = request.form.getlist('floor[]')
+        room_types = request.form.getlist('room_type[]')
+
+        conn = get_connection()
+        cur = conn.cursor()
+
+        for flat_no, floor, room_type in zip(flat_nos, floors, room_types):
+            cur.execute("""
+                INSERT INTO flats (project_id, flat_no, floor, room_type)
+                VALUES (%s, %s, %s, %s)
+            """, (project_id, flat_no, floor, room_type))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash('Daireler başarıyla eklendi.', 'success')
+        return redirect(url_for('dashboard'))
+
+    return render_template('project_flats.html', project_id=project_id)
+
+# app.py dosyanıza ekleyin
+
+# app.py dosyanızdaki @app.route('/assign_flat_owner', methods=['GET', 'POST']) fonksiyonunu tamamen bu kodla değiştirin
+
+# app.py dosyanızdaki @app.route('/assign_flat_owner', methods=['GET', 'POST']) fonksiyonunu tamamen bu kodla değiştirin
+
+
+@app.route('/assign_flat_owner', methods=['GET', 'POST'])
+def assign_flat_owner():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    if request.method == 'POST':
+        # project_id ve flat_id int() ile dönüştürüldü
+        project_id = int(request.form.get('project_id'))
+        flat_id = int(request.form.get('flat_id'))
+        customer_option = request.form.get('customer_option') # 'existing' veya 'new'
+
+        customer_id = None
+
+        print(f"DEBUG: POST isteği alındı. project_id: {project_id} (tip: {type(project_id)}), flat_id: {flat_id} (tip: {type(flat_id)}), customer_option: {customer_option}")
+
+        try:
+            if customer_option == 'new':
+                # Yeni müşteri ekle
+                new_first_name = request.form.get('new_first_name')
+                new_last_name = request.form.get('new_last_name')
+                new_phone = request.form.get('new_phone')
+                new_national_id = request.form.get('new_national_id')
+
+                print(f"DEBUG: Yeni müşteri seçeneği. Ad: {new_first_name}, Soyad: {new_last_name}")
+
+                if not new_first_name or not new_last_name:
+                    flash('Yeni müşteri için ad ve soyad zorunludur.', 'danger')
+                    return redirect(url_for('assign_flat_owner'))
+
+                cur.execute("""
+                    INSERT INTO customers (first_name, last_name, phone, national_id)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id
+                """, (new_first_name, new_last_name, new_phone, new_national_id))
+                customer_id = cur.fetchone()[0]
+                conn.commit() # Yeni müşteri ekleme işlemi burada commit ediliyor
+                flash(f'Yeni müşteri "{new_first_name} {new_last_name}" başarıyla eklendi.', 'info')
+                print(f"DEBUG: Yeni müşteri eklendi. customer_id: {customer_id}")
+
+            elif customer_option == 'existing':
+                # Mevcut müşteriyi kullan
+                customer_id = request.form.get('customer_id')
+                print(f"DEBUG: Mevcut müşteri seçeneği. customer_id: {customer_id}")
+                if not customer_id:
+                    flash('Lütfen mevcut bir müşteri seçin.', 'danger')
+                    return redirect(url_for('assign_flat_owner'))
+            else:
+                flash('Geçersiz müşteri seçeneği.', 'danger')
+                return redirect(url_for('assign_flat_owner'))
+
+            # Dairenin owner_id'sini güncelleme işlemi
+            if customer_id and flat_id and project_id:
+                # Dairenin gerçekten var olup olmadığını kontrol edelim
+                cur.execute("SELECT id FROM flats WHERE id = %s AND project_id = %s", (flat_id, project_id))
+                existing_flat = cur.fetchone()
+
+                if existing_flat:
+                    cur.execute("""
+                        UPDATE flats
+                        SET owner_id = %s
+                        WHERE id = %s AND project_id = %s
+                    """, (customer_id, flat_id, project_id))
+                    
+                    # Kaç satırın etkilendiğini kontrol edelim
+                    rows_updated = cur.rowcount
+                    conn.commit() # Daire atama işlemi burada commit ediliyor
+
+                    if rows_updated > 0:
+                        flash('Daire sahibi başarıyla atandı!', 'success')
+                        print(f"DEBUG: Daireye sahip atandı. Daire ID: {flat_id}, Müşteri ID: {customer_id}")
+                    else:
+                        # Bu durum, dairenin bulunmasına rağmen UPDATE'in etki etmemesi
+                        # (örn: owner_id zaten aynı müşteri ise veya bir kısıtlama varsa)
+                        flash('Daire sahibi atanamadı. Daire zaten bu müşteriye atanmış olabilir veya bir sorun oluştu.', 'warning')
+                        print(f"DEBUG: Daireye sahip atanamadı. Rows updated: {rows_updated}. Daire ID: {flat_id}, Müşteri ID: {customer_id}")
+                else:
+                    flash('Seçilen daire bu projede bulunamadı.', 'danger')
+                    print(f"DEBUG: Daire bulunamadı. Flat ID: {flat_id}, Project ID: {project_id}")
+                
+                # Yönlendirme değiştirildi: Dashboard yerine aynı sayfaya yönlendiriliyor
+                return redirect(url_for('assign_flat_owner')) 
+            else:
+                flash('Daire ataması için gerekli tüm bilgiler sağlanmadı.', 'danger')
+                print("DEBUG: Daire ataması için eksik bilgi (customer_id, flat_id, project_id eksik).")
+                return redirect(url_for('assign_flat_owner'))
+
+        except Exception as e:
+            conn.rollback() # Hata durumunda değişiklikleri geri al
+            flash(f'Daire sahibi ataması sırasında bir hata oluştu: {e}', 'danger')
+            print(f"HATA: Daire ataması sırasında hata: {e}") # Sunucu konsoluna hatayı yazdır
+        finally:
+            cur.close()
+            conn.close()
+
+    # GET isteği veya POST hatası durumunda formu göstermek için gerekli verileri çek
+    projects = []
+    flats_with_owners = [] # Tabloda göstermek için
+    customers = [] # Müşteriler dropdown için tekrar çekiliyor
+
+    try:
+        cur.execute("SELECT id, name FROM projects ORDER BY name")
+        projects = cur.fetchall()
+
+        # owner_id, first_name, last_name, phone, national_id'yi de çekerek JavaScript'e geçireceğiz
+        # DİKKAT: Sıralama önemli!
+        cur.execute("""
+            SELECT f.id, pr.name, f.flat_no, f.floor, 
+                   c.first_name, c.last_name, f.owner_id, c.phone, c.national_id
+            FROM flats f
+            JOIN projects pr ON f.project_id = pr.id
+            LEFT JOIN customers c ON f.owner_id = c.id
+            ORDER BY pr.name, f.floor, f.flat_no
+        """)
+        flats_with_owners = cur.fetchall()
+
+        # Müşteriler dropdown için çekiliyor
+        cur.execute("SELECT id, first_name, last_name FROM customers ORDER BY first_name, last_name")
+        customers = cur.fetchall()
+
+    except Exception as e:
+        flash(f'Veri çekilirken bir hata oluştu: {e}', 'danger')
+        print(f"HATA: Veri çekilirken hata: {e}") # Sunucu konsoluna hatayı yazdır
+    finally:
+        cur.close()
+        conn.close()
+    
+    return render_template('assign_flat_owner.html',
+                           projects=projects,
+                           flats_with_owners=flats_with_owners,
+                           customers=customers) # customers değişkeni artık gönderiliyor
+
+@app.route('/delete_flat_owner_data', methods=['POST'])
+def delete_flat_owner_data():
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'message': 'Yetkisiz erişim'}), 401
+
+    data = request.get_json()
+    flat_id = data.get('flat_id')
+
+    if not flat_id:
+        return jsonify({'success': False, 'message': 'Daire ID eksik.'}), 400
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        # 1. Dairenin sahibini NULL yap
+        cur.execute("""
+            UPDATE flats
+            SET owner_id = NULL
+            WHERE id = %s
+        """, (flat_id,))
+        
+        # 2. Bu daireye ait tüm ödeme kayıtlarını sil
+        cur.execute("""
+            DELETE FROM payments
+            WHERE flat_id = %s
+        """, (flat_id,))
+
+        # 3. Bu daireye ait tüm ödeme planı kayıtlarını sil
+        cur.execute("""
+            DELETE FROM installment_schedule
+            WHERE flat_id = %s
+        """, (flat_id,))
+        
+        conn.commit()
+        print(f"DEBUG: Daire ID {flat_id} için sahip ve ilgili veriler silindi.")
+        # Başarılı yanıtı JSON olarak döndür
+        return jsonify({'success': True, 'message': 'Daire sahibi ve ilgili veriler başarıyla silindi.'})
+
+    except Exception as e:
+        conn.rollback()
+        print(f"HATA: Daire sahibi ve ilgili veriler silinirken hata oluştu: {e}")
+        # Hata durumunda JSON yanıtı ve 500 status kodu döndür
+        return jsonify({'success': False, 'message': f'Veri silinirken hata oluştu: {str(e)}'}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+# app.py dosyanıza bu iki yeni route'u ekleyin
+
+@app.route('/project/<int:project_id>/expenses')
+def list_expenses(project_id):
+    """Belirli bir projenin tüm giderlerini listeler."""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Proje bilgilerini al
+    cur.execute("SELECT name, project_type FROM projects WHERE id = %s", (project_id,))
+    project = cur.fetchone()
+    if not project:
+        flash('Proje bulunamadı.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    # Projeye ait giderleri al
+    cur.execute("""
+        SELECT id, title, amount, expense_date, description
+        FROM expenses
+        WHERE project_id = %s
+        ORDER BY expense_date DESC
+    """, (project_id,))
+    expenses = cur.fetchall()
+    
+    # Projenin toplam giderini hesapla
+    cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
+    total_expenses = cur.fetchone()[0]
+
+    cur.close()
+    conn.close()
+
+    return render_template('expenses.html', 
+                           project=project, 
+                           project_id=project_id, 
+                           expenses=expenses, 
+                           total_expenses=total_expenses)
+
+@app.route('/project/<int:project_id>/expense/new', methods=['GET', 'POST'])
+def add_expense(project_id):
+    """Belirli bir projeye yeni bir gider ekler."""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+    
+    # Proje var mı diye kontrol et
+    cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
+    project = cur.fetchone()
+    if not project:
+        flash('Proje bulunamadı.', 'danger')
+        cur.close()
+        conn.close()
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        title = request.form['title']
+        amount = request.form['amount']
+        expense_date = request.form['expense_date']
+        description = request.form.get('description', '') # Açıklama opsiyonel olabilir
+
+        if not title or not amount or not expense_date:
+            flash('Başlık, Tutar ve Tarih alanları zorunludur.', 'danger')
+            return redirect(url_for('add_expense', project_id=project_id))
+
+        try:
+            cur.execute("""
+                INSERT INTO expenses (project_id, title, amount, expense_date, description)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (project_id, title, amount, expense_date, description))
+            conn.commit()
+            flash('Gider başarıyla eklendi.', 'success')
+        except Exception as e:
+            conn.rollback()
+            flash(f'Gider eklenirken bir hata oluştu: {e}', 'danger')
+        finally:
+            cur.close()
+            conn.close()
+        
+        return redirect(url_for('list_expenses', project_id=project_id))
+
+    cur.close()
+    conn.close()
+    # GET isteği için
+    return render_template('new_expense.html', project_name=project[0], project_id=project_id)
+
+
+@app.route('/api/project/<int:project_id>/flats')
+def get_flats_for_project(project_id):
+    if 'user_id' not in session:
+        return jsonify({'error': 'Yetkisiz erişim'}), 401
+
+    conn = get_connection()
+    cur = conn.cursor()
+    # Sadece sahibi olmayan daireleri listeleyelim ki yanlışlıkla üzerine yazılmasın
+    cur.execute("""
+        SELECT id, flat_no, floor, room_type 
+        FROM flats 
+        WHERE project_id = %s AND owner_id IS NOT NULL
+        ORDER BY floor, flat_no
+    """, (project_id,))
+    flats_raw = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    flats = [{'id': f[0], 'text': f"Kat: {f[2]}, No: {f[1]} ({f[3]})"} for f in flats_raw]
+    return jsonify(flats)
+
+
+@app.route('/payment_plan/new', methods=['GET', 'POST'])
+def new_payment_plan():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    if request.method == 'POST':
+        try:
+            flat_id = int(request.form['flat_id'])
+            
+            # Dinamik olarak eklenen taksit verilerini listeler halinde al
+            due_dates = request.form.getlist('due_date[]')
+            amounts = request.form.getlist('amount[]')
+
+            if not due_dates or not amounts or len(due_dates) != len(amounts):
+                flash('Lütfen en az bir geçerli taksit girin.', 'danger')
+                return redirect(url_for('new_payment_plan'))
+
+            # Girilen tutarları sayısal değere çevir ve toplam borcu hesapla
+            numeric_amounts = [float(a) for a in amounts]
+            total_price = sum(numeric_amounts)
+            total_installments = len(numeric_amounts)
+            
+            # --- Veritabanı İşlemleri ---
+            # 1. Bu daireye ait eski bir ödeme planı varsa temizle
+            cur.execute("DELETE FROM installment_schedule WHERE flat_id = %s", (flat_id,))
+            
+            # 2. Dairenin toplam fiyat ve taksit sayısını yeni hesaplanan değerlerle güncelle
+            cur.execute("UPDATE flats SET total_price = %s, total_installments = %s WHERE id = %s",
+                        (total_price, total_installments, flat_id))
+
+            # 3. Yeni taksit planını satır satır ekle
+            for date_str, amount in zip(due_dates, numeric_amounts):
+                due_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                cur.execute("""
+                    INSERT INTO installment_schedule (flat_id, due_date, amount, is_paid)
+                    VALUES (%s, %s, %s, %s)
+                """, (flat_id, due_date, amount, False))
+            
+            conn.commit()
+            flash(f'{total_installments} taksitten oluşan yeni ödeme planı başarıyla oluşturuldu!', 'success')
+            return redirect(url_for('debt_status'))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f'Bir hata oluştu: {e}', 'danger')
+            print(f"HATA: Manuel ödeme planı oluşturulurken: {e}")
+        finally:
+            cur.close()
+            conn.close()
+            # GET isteğinde hata olursa veya POST sonrası yönlendirme olmazsa diye
+            # projeleri tekrar çekmek güvenli olabilir, ancak şimdilik bu şekilde bırakıyoruz.
+            # Normalde POST bloğunun sonunda her zaman redirect olmalı.
+            
+    # GET isteği için (bu kısım aynı kalıyor)
+    cur.execute("SELECT id, name FROM projects WHERE project_type = 'normal' ORDER BY name")
+    projects = cur.fetchall()
+    cur.close()
+    conn.close()
+    
+    return render_template('new_payment_plan.html', projects=projects)
+
+@app.route('/debts')
+def debt_status():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Tüm taksit planlarını; proje, daire ve müşteri bilgileriyle birlikte çek
+    cur.execute("""
+        SELECT 
+            p.name AS project_name,
+            c.first_name,
+            c.last_name,
+            f.id as flat_id,
+            f.flat_no,
+            f.floor,
+            f.total_price AS flat_total_price,
+            s.id AS schedule_id,
+            s.due_date,
+            s.amount,
+            s.is_paid
+        FROM installment_schedule s
+        JOIN flats f ON s.flat_id = f.id
+        JOIN projects p ON f.project_id = p.id
+        JOIN customers c ON f.owner_id = c.id
+        WHERE f.project_id IN (SELECT id FROM projects WHERE project_type = 'normal')
+        ORDER BY p.name, f.floor, f.flat_no, s.due_date
+    """)
+    
+    installments_raw = cur.fetchall()
+
+    # Dairelerin toplam ödemelerini ayrı bir sorgu ile alıp sözlüğe atalım
+    cur.execute("""
+        SELECT flat_id, COALESCE(SUM(amount), 0) as total_paid
+        FROM payments
+        GROUP BY flat_id
+    """)
+    total_payments_by_flat = dict(cur.fetchall())
+    
+    cur.close()
+    conn.close()
+
+    # Veriyi şablonda kullanmak üzere gruplayalım ve işleyelim
+    flats_data = []
+    # Daire ID'sine (flat_id) göre gruplama yap
+    for key, group in groupby(installments_raw, key=lambda x: x[3]):
+        group_list = list(group)
+        first_item = group_list[0]
+        
+        flat_info = {
+            'flat_id': key,
+            'project_name': first_item[0],
+            'customer_name': f"{first_item[1]} {first_item[2]}",
+            'flat_details': f"Kat: {first_item[5]}, No: {first_item[4]}",
+            'flat_total_price': first_item[6] or 0,
+            'total_paid': total_payments_by_flat.get(key, 0), # Sözlükten toplam ödemeyi al
+            'installments': []
+        }
+        flat_info['remaining_debt'] = flat_info['flat_total_price'] - flat_info['total_paid']
+
+        today = date.today()
+        for item in group_list:
+            due_date = item[8]
+            is_paid = item[10]
+            status = ""
+            css_class = ""
+
+            if is_paid:
+                status = "Ödendi"
+                css_class = "table-success"
+            elif due_date < today:
+                status = "Gecikmiş"
+                css_class = "table-danger"
+            else:
+                status = "Bekleniyor"
+                css_class = "table-light"
+            
+            flat_info['installments'].append({
+                'due_date': due_date,
+                'amount': item[9],
+                'status': status,
+                'css_class': css_class
+            })
+        
+        flats_data.append(flat_info)
+
+    return render_template('debts.html', flats_data=flats_data)
+
+# app.py dosyanıza bu yeni route'u ekleyin
+
+@app.route('/flat/<int:flat_id>/print')
+def print_debt_statement(flat_id):
+    """Belirli bir dairenin borç dökümünü yazdırma için hazırlar."""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        # 1. Daire, proje ve müşteri bilgilerini çek
+        cur.execute("""
+            SELECT 
+                p.name, c.first_name, c.last_name, f.floor, f.flat_no, f.total_price
+            FROM flats f
+            JOIN projects p ON f.project_id = p.id
+            JOIN customers c ON f.owner_id = c.id
+            WHERE f.id = %s
+        """, (flat_id,))
+        statement_info_raw = cur.fetchone()
+
+        if not statement_info_raw:
+            flash('Döküm alınacak daire bulunamadı.', 'danger')
+            return redirect(url_for('debt_status'))
+
+        # 2. Daireye ait tüm taksitleri çek
+        cur.execute("""
+            SELECT due_date, amount, is_paid
+            FROM installment_schedule
+            WHERE flat_id = %s
+            ORDER BY due_date
+        """, (flat_id,))
+        installments_raw = cur.fetchall()
+
+        # 3. Daire için yapılan toplam ödemeyi çek
+        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE flat_id = %s", (flat_id,))
+        total_paid = cur.fetchone()[0]
+
+        # 4. Verileri işleyip şablon için hazırla
+        statement_data = {
+            'project_name': statement_info_raw[0],
+            'customer_name': f"{statement_info_raw[1]} {statement_info_raw[2]}",
+            'flat_details': f"Kat: {statement_info_raw[3]}, No: {statement_info_raw[4]}",
+            'flat_total_price': statement_info_raw[5] or 0,
+            'total_paid': total_paid,
+            'remaining_debt': (statement_info_raw[5] or 0) - total_paid,
+            'print_date': date.today(),
+            'installments': []
+        }
+
+        today = date.today()
+        for due_date, amount, is_paid in installments_raw:
+            status = ""
+            if is_paid:
+                status = "Ödendi"
+            elif due_date < today:
+                status = "Gecikmiş"
+            else:
+                status = "Bekleniyor"
+            
+            statement_data['installments'].append({
+                'due_date': due_date,
+                'amount': amount,
+                'status': status
+            })
+
+        return render_template('print_statement.html', data=statement_data)
+
+    except Exception as e:
+        flash(f"Döküm oluşturulurken bir hata oluştu: {e}", "danger")
+        return redirect(url_for('debt_status'))
+    finally:
+        cur.close()
+        conn.close()
+
+
+# app.py dosyanızdaki mevcut list_payments fonksiyonunu bu kodla değiştirin.
+
+@app.route('/payments')
+def list_payments():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    # GET parametreleri (Filtreleme)
+    project = request.args.get('project')
+    start = request.args.get('start_date')
+    end = request.args.get('end_date')
+    
+    # === YENİ: Sıralama parametreleri ===
+    sort_by = request.args.get('sort_by', 'payment_date') # Varsayılan: tarihe göre sırala
+    order = request.args.get('order', 'desc') # Varsayılan: azalan sırada
+
+    # Güvenlik için sıralanabilir sütunları beyaz listeye al
+    sortable_columns = {
+        'proje': 'pr.name',
+        'musteri': 'c.last_name',
+        'tarih': 'p.payment_date',
+        'tutar': 'p.amount'
+    }
+    
+    # Geçerli bir sıralama sütunu mu kontrol et, değilse varsayılana dön
+    order_by_column = sortable_columns.get(sort_by, 'p.payment_date')
+    
+    # Geçerli bir sıralama yönü mü kontrol et
+    if order not in ['asc', 'desc']:
+        order = 'desc'
+
+    # Base query
+    sql = """
+        SELECT p.id, pr.name, c.first_name, c.last_name, f.flat_no, f.floor,
+               p.installment, p.amount, p.payment_date
+        FROM payments p
+        JOIN flats f ON p.flat_id = f.id
+        JOIN customers c ON f.owner_id = c.id
+        JOIN projects pr ON f.project_id = pr.id
+    """
+    filters = []
+    params = []
+
+    # Filtre ekleyelim
+    if project:
+        filters.append("pr.name = %s")
+        params.append(project)
+    if start:
+        filters.append("p.payment_date >= %s")
+        params.append(start)
+    if end:
+        filters.append("p.payment_date <= %s")
+        params.append(end)
+
+    if filters:
+        sql += " WHERE " + " AND ".join(filters)
+
+    # === YENİ: Dinamik ORDER BY ifadesi ===
+    sql += f" ORDER BY {order_by_column} {order.upper()}"
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(sql, tuple(params))
+    payments = cur.fetchall()
+    
+    # Projeler dropdown için
+    cur.execute("SELECT name FROM projects ORDER BY name")
+    all_projects = [r[0] for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+
+    return render_template('payments.html',
+                           payments=payments,
+                           all_projects=all_projects,
+                           selected_project=project,
+                           start_date=start,
+                           end_date=end,
+                           # === YENİ: Sıralama bilgilerini şablona gönder ===
+                           sort_by=sort_by,
+                           order=order)
+
+@app.route('/reports')
+def reports():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # 1. Tüm projeleri çek
+    cur.execute("SELECT id, name, project_type FROM projects ORDER BY name")
+    projects = cur.fetchall()
+
+    project_summaries = []
+    for project_id, project_name, project_type in projects:
+        summary = {
+            'project_id': project_id,
+            'project_name': project_name,
+            'project_type': project_type
+        }
+
+        if project_type == 'normal':
+            # Normal projeler için finansal verileri hesapla
+            # Planlanan Toplam Gelir (Ödeme planlarındaki tüm taksitlerin toplamı)
+            cur.execute("""
+                SELECT COALESCE(SUM(s.amount), 0) FROM installment_schedule s
+                JOIN flats f ON s.flat_id = f.id WHERE f.project_id = %s
+            """, (project_id,))
+            planned_revenue = cur.fetchone()[0]
+
+            # Tahsil Edilen Toplam Gelir (Ödemeler tablosu)
+            cur.execute("""
+                SELECT COALESCE(SUM(p.amount), 0) FROM payments p
+                JOIN flats f ON p.flat_id = f.id WHERE f.project_id = %s
+            """, (project_id,))
+            collected_revenue = cur.fetchone()[0]
+            
+            # Toplam Gider
+            cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
+            total_expenses = cur.fetchone()[0]
+
+            summary.update({
+                'planned_revenue': planned_revenue,
+                'collected_revenue': collected_revenue,
+                'outstanding_debt': planned_revenue - collected_revenue,
+                'progress_percentage': (collected_revenue / planned_revenue * 100) if planned_revenue > 0 else 0,
+                'total_expenses': total_expenses,
+                'net_cash_flow': collected_revenue - total_expenses
+            })
+
+        elif project_type == 'cooperative':
+            # Kooperatif projeler için finansal verileri hesapla
+            # Üyelerden Toplanan (Ödemeler tablosu)
+            cur.execute("""
+                SELECT COALESCE(SUM(p.amount), 0) FROM payments p
+                JOIN flats f ON p.flat_id = f.id WHERE f.project_id = %s
+            """, (project_id,))
+            member_contributions = cur.fetchone()[0]
+
+            # Toplam Gider
+            cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
+            total_expenses = cur.fetchone()[0]
+            
+            summary.update({
+                'member_contributions': member_contributions,
+                'total_expenses': total_expenses,
+                'cash_balance': member_contributions - total_expenses
+            })
+        
+        project_summaries.append(summary)
+
+    cur.close()
+    conn.close()
+
+    return render_template('reports.html', 
+                           project_summaries=project_summaries,
+                           user_name=session.get('user_name'))
+
+
+@app.route('/dashboard')
+def dashboard():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Toplam müşteri
+    cur.execute("SELECT COUNT(*) FROM customers;")
+    total_customers = cur.fetchone()[0]
+
+    # Toplam daire
+    cur.execute("SELECT COUNT(*) FROM flats;")
+    total_flats = cur.fetchone()[0]
+
+    # Toplam ödeme sayısı
+    cur.execute("SELECT COUNT(*) FROM payments;")
+    total_payments = cur.fetchone()[0]
+
+    # Toplam ödenen tutar
+    cur.execute("SELECT COALESCE(SUM(amount),0) FROM payments;")
+    total_amount = cur.fetchone()[0]
+
+    # --- EKSİK OLAN BÖLÜM BURASI ---
+    # Proje listesini veritabanından çek
+    cur.execute("SELECT id, name, project_type FROM projects ORDER BY name")
+    projects_raw = cur.fetchall()
+    
+    # Ham veriyi sözlük listesine çevirerek şablon için hazırla
+    projects = []
+    for p in projects_raw:
+        projects.append({'id': p[0], 'name': p[1], 'project_type': p[2]})
+    # --- EKSİK BÖLÜMÜN SONU ---
+
+    cur.close()
+    conn.close()
+
+    return render_template('dashboard.html',
+        user_name=session.get('user_name'),
+        total_customers=total_customers,
+        total_flats=total_flats,
+        total_payments=total_payments,
+        total_amount=total_amount,
+        # Değişkeni şablona gönder
+        projects=projects
+    )
+
+# app.py dosyanıza bu yeni route'u ekleyin
+
+@app.route('/api/monthly_payments')
+def monthly_payments_api():
+    """Son 12 ayın aylık toplam ödemelerini JSON formatında döndürür."""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Yetkisiz erişim'}), 401
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Son 12 ayın verisini çekmek için veritabanına özel bir sorgu gönderiyoruz.
+    # Bu sorgu, her ayın başlangıcını ve o aydaki toplam ödemeyi hesaplar.
+    # `DATE_TRUNC('month', ...)` fonksiyonu tarihi ayın ilk gününe yuvarlar.
+    cur.execute("""
+        SELECT 
+            DATE_TRUNC('month', payment_date)::DATE AS month, 
+            SUM(amount) AS total_amount
+        FROM 
+            payments
+        WHERE 
+            payment_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+        GROUP BY 
+            month
+        ORDER BY 
+            month;
+    """)
+    
+    results = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    # Veritabanından gelen veriyi grafiğin beklediği formata dönüştürelim
+    # Örnek: labels = ["Ocak", "Şubat", ...], data = [5000, 7500, ...]
+    
+    # Son 12 ayın tam listesini oluşturalım (veri olmayan aylar için 0 değeri)
+    labels = []
+    data = []
+    today = date.today()
+    
+    # Veritabanından gelen sonuçları kolay erişim için bir sözlüğe dönüştür
+    db_data = {row[0]: float(row[1]) for row in results}
+
+    for i in range(12):
+        # Ay hesaplaması: 11 ay öncesinden başlayarak bugüne kadar gel
+        month_date = (today - relativedelta(months=11 - i))
+        month_start = month_date.replace(day=1)
+        
+        # Ay ismini Türkçe olarak formatla (Örn: "Temmuz 2024")
+        # Bu formatlama için locale ayarlarının sunucuda doğru olması gerekebilir.
+        # Alternatif olarak manuel bir ay listesi de kullanılabilir.
+        # Ay ismini standart ISO formatında gönder (YYYY-AA-GG)
+        labels.append(month_start.isoformat()) # Örn: 2025-07-01
+        
+        # O ay için veri varsa al, yoksa 0 olarak ata
+        data.append(db_data.get(month_start, 0))
+
+    return jsonify({'labels': labels, 'data': data})
+
+@app.route('/')
+def index():
+    return redirect(url_for('dashboard'))
+
+# app.py dosyanızdaki mevcut new_payment fonksiyonunu bu kodla değiştirin.
+
+@app.route('/payment/new', methods=['GET', 'POST'])
+def new_payment():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    if request.method == 'POST':
+        try:
+            flat_id = int(request.form.get('flat_id'))
+            amount = float(request.form.get('amount'))
+            payment_date_str = request.form.get('payment_date')
+            description = request.form.get('description', 'Müşteri Ödemesi')
+
+            if not all([flat_id, amount, payment_date_str]):
+                flash('Lütfen tüm zorunlu alanları doldurun.', 'danger')
+                return redirect(url_for('new_payment'))
+
+            payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d').date()
+
+            # 1. Ödemeyi `payments` tablosuna ekle
+            cur.execute("""
+                INSERT INTO payments (flat_id, amount, payment_date, description)
+                VALUES (%s, %s, %s, %s)
+            """, (flat_id, amount, payment_date, description))
+
+            # 2. Bu ödemeyle eşleşen, ödenmemiş en eski taksiti bulup güncelle
+            # Not: Sadece tutar birebir eşleşirse taksiti kapatır.
+            cur.execute("""
+                UPDATE installment_schedule
+                SET is_paid = TRUE
+                WHERE id = (
+                    SELECT id FROM installment_schedule
+                    WHERE flat_id = %s AND amount = %s AND is_paid = FALSE
+                    ORDER BY due_date
+                    LIMIT 1
+                )
+            """, (flat_id, amount))
+            
+            # Etkilenen satır sayısını kontrol et
+            updated_rows = cur.rowcount
+
+            conn.commit()
+
+            if updated_rows > 0:
+                flash('Ödeme başarıyla kaydedildi ve ilgili taksit kapatıldı!', 'success')
+            else:
+                flash('Ödeme başarıyla kaydedildi. (Eşleşen taksit bulunamadı)', 'info')
+            
+            return redirect(url_for('new_payment'))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f'Ödeme kaydedilirken bir hata oluştu: {e}', 'danger')
+            print(f"HATA: Yeni ödeme kaydında: {e}")
+        finally:
+            cur.close()
+            conn.close()
+    
+    # GET isteği için: Projeleri forma göndermek üzere çek
+    cur.execute("SELECT id, name FROM projects ORDER BY name")
+    projects = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return render_template('new_payment.html', 
+                           projects=projects, 
+                           user_name=session.get('user_name'))
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
