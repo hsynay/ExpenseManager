@@ -1,60 +1,105 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8">
-  <title>Daireleri Tanımla</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <meta charset="UTF-8">
+    <title>"{{ project_name }}" Projesi Daire Yönetimi</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body class="container py-4">
-  <h3 class="mb-4">Daireleri Tanımla</h3>
+<body class="bg-light">
+  
+    <nav class="navbar navbar-expand-lg navbar-dark fixed-top shadow">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}"><i class="fa-solid fa-building"></i> KONAK</a>
+        </div>
+    </nav>
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, msg in messages %}
-      <div class="alert alert-{{category}}">{{msg}}</div>
-    {% endfor %}
-  {% endwith %}
+    <div class="container">
+        <div class="py-5 text-center">
+            <h2>"{{ project_name }}" Projesi</h2>
+            <p class="lead">Bu projedeki tüm daireleri buradan yönetebilirsiniz. Değişiklik yaptıktan sonra "Tümünü Kaydet" butonuna basmayı unutmayın.</p>
+        </div>
 
-  <form method="POST">
-    <div id="flat-entries">
-      <div class="row mb-3 flat-entry">
-        <div class="col-md-3">
-          <label class="form-label">Daire No</label>
-          <input type="number" name="flat_no[]" class="form-control" required>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, msg in messages %}
+                <div class="alert alert-{{category}}">{{msg}}</div>
+            {% endfor %}
+        {% endwith %}
+
+        <div class="card p-4">
+            <form method="POST">
+                <div id="flat-entries">
+                    <!-- Başlık Satırı -->
+                    <div class="row mb-2 d-none d-md-flex">
+                        <div class="col-md-3"><label class="form-label fw-bold">Blok Adı</label></div>
+                        <div class="col-md-2"><label class="form-label fw-bold">Daire No</label></div>
+                        <div class="col-md-2"><label class="form-label fw-bold">Kat</label></div>
+                        <div class="col-md-3"><label class="form-label fw-bold">Oda Tipi</label></div>
+                        <div class="col-md-2"></div>
+                    </div>
+
+                    <!-- Mevcut Daireler -->
+                    {% for flat in existing_flats %}
+                    <div class="row g-3 mb-3 align-items-center flat-entry">
+                        <div class="col-md-3"><input type="text" name="block_name[]" class="form-control" value="{{ flat[0] }}" required></div>
+                        <div class="col-md-2"><input type="number" name="flat_no[]" class="form-control" value="{{ flat[1] }}" required></div>
+                        <div class="col-md-2"><input type="number" name="floor[]" class="form-control" value="{{ flat[2] }}" required></div>
+                        <div class="col-md-3"><input type="text" name="room_type[]" class="form-control" value="{{ flat[3] }}" placeholder="Örn: 2+1" required></div>
+                        <div class="col-md-2"><button type="button" class="btn btn-danger w-100 remove-flat"><i class="fa-solid fa-trash-alt"></i> Sil</button></div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- === DÜZELTME: Şablon artık 'name' içermiyor ve 'disabled' === -->
+                <div class="row g-3 mb-3 align-items-center flat-entry-template" style="display: none;">
+                    <div class="col-md-3"><input type="text" data-name="block_name[]" class="form-control" placeholder="Örn: A Blok" required disabled></div>
+                    <div class="col-md-2"><input type="number" data-name="flat_no[]" class="form-control" required disabled></div>
+                    <div class="col-md-2"><input type="number" data-name="floor[]" class="form-control" required disabled></div>
+                    <div class="col-md-3"><input type="text" data-name="room_type[]" class="form-control" placeholder="Örn: 2+1" required disabled></div>
+                    <div class="col-md-2"><button type="button" class="btn btn-danger w-100 remove-flat"><i class="fa-solid fa-trash-alt"></i> Sil</button></div>
+                </div>
+
+                <hr>
+
+                <div class="d-flex justify-content-between">
+                    <button type="button" id="add-flat" class="btn btn-success">
+                        <i class="fa-solid fa-plus me-1"></i> Yeni Daire Satırı Ekle
+                    </button>
+                    <button type="submit" class="btn btn-primary btn-lg">
+                        <i class="fa-solid fa-save me-2"></i> Tüm Değişiklikleri Kaydet
+                    </button>
+                </div>
+            </form>
         </div>
-        <div class="col-md-3">
-          <label class="form-label">Kat</label>
-          <input type="number" name="floor[]" class="form-control" required>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Oda Tipi</label>
-          <input type="text" name="room_type[]" class="form-control" placeholder="örneğin 2+1" required>
-        </div>
-        <div class="col-md-2 d-flex align-items-end">
-          <button type="button" class="btn btn-danger remove-flat">Sil</button>
-        </div>
-      </div>
     </div>
 
-    <button type="button" id="add-flat" class="btn btn-secondary mb-3">Yeni Daire Ekle</button>
-    <br>
-    <button type="submit" class="btn btn-primary">Tüm Daireleri Kaydet</button>
-  </form>
+    <!-- === DÜZELTİLMİŞ JAVASCRIPT === -->
+    <script>
+        document.getElementById('add-flat').addEventListener('click', function () {
+            const template = document.querySelector('.flat-entry-template');
+            const newEntry = template.cloneNode(true);
 
-  <script>
-    document.getElementById('add-flat').addEventListener('click', function () {
-      const newEntry = document.querySelector('.flat-entry').cloneNode(true);
-      newEntry.querySelectorAll('input').forEach(input => input.value = '');
-      document.getElementById('flat-entries').appendChild(newEntry);
-    });
+            newEntry.classList.remove('flat-entry-template');
+            newEntry.classList.add('flat-entry');
+            newEntry.style.display = '';
 
-    document.addEventListener('click', function (e) {
-      if (e.target.classList.contains('remove-flat')) {
-        const entries = document.querySelectorAll('.flat-entry');
-        if (entries.length > 1) {
-          e.target.closest('.flat-entry').remove();
-        }
-      }
-    });
-  </script>
+            // Klonlanan satırdaki input'ların değerlerini temizle,
+            // 'name' niteliklerini ata ve 'disabled' durumunu kaldır.
+            newEntry.querySelectorAll('input').forEach(input => {
+                input.value = '';
+                input.name = input.dataset.name;
+                input.disabled = false;
+            });
+
+            document.getElementById('flat-entries').appendChild(newEntry);
+        });
+
+        document.getElementById('flat-entries').addEventListener('click', function (e) {
+            if (e.target && e.target.closest('.remove-flat')) {
+                e.target.closest('.flat-entry').remove();
+            }
+        });
+    </script>
 </body>
 </html>

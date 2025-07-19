@@ -96,33 +96,80 @@ def new_project():
 
 
 
+# app.py'deki add_flats fonksiyonunu bununla değiştirin
+
+# app.py dosyanızdaki mevcut add_flats fonksiyonunu bu kodla değiştirin.
+
 @app.route('/project/<int:project_id>/flats', methods=['GET', 'POST'])
 def add_flats(project_id):
+    """
+    Bir projedeki tüm daireleri yönetir (CRUD).
+    POST isteğinde, projenin tüm dairelerini siler ve formdan gelen yeni listeyi kaydeder.
+    """
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
+    conn = get_connection()
+    cur = conn.cursor()
+
     if request.method == 'POST':
+        # Formdan gelen tüm daire verilerini listeler halinde al
+        block_names = request.form.getlist('block_name[]')
         flat_nos = request.form.getlist('flat_no[]')
         floors = request.form.getlist('floor[]')
         room_types = request.form.getlist('room_type[]')
+        
+        try:
+            # 1. Önce bu projeye ait tüm mevcut daireleri sil (temiz bir başlangıç için)
+            cur.execute("DELETE FROM flats WHERE project_id = %s", (project_id,))
+            
+            # 2. Formdan gelen güncel listeyi veritabanına yeniden ekle
+            for block, flat_no, floor, room_type in zip(block_names, flat_nos, floors, room_types):
+                # Sadece dolu satırların kaydedildiğinden emin ol
+                if block and flat_no and floor and room_type:
+                    cur.execute("""
+                        INSERT INTO flats (project_id, block_name, flat_no, floor, room_type)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (project_id, block.strip(), flat_no, floor, room_type.strip()))
+            
+            conn.commit()
+            flash('Daire listesi başarıyla güncellendi.', 'success')
+            return redirect(url_for('dashboard'))
 
-        conn = get_connection()
-        cur = conn.cursor()
+        except Exception as e:
+            conn.rollback()
+            flash(f'Daireler güncellenirken bir hata oluştu: {e}', 'danger')
+            return redirect(url_for('add_flats', project_id=project_id))
+        finally:
+            cur.close()
+            conn.close()
 
-        for flat_no, floor, room_type in zip(flat_nos, floors, room_types):
-            cur.execute("""
-                INSERT INTO flats (project_id, flat_no, floor, room_type)
-                VALUES (%s, %s, %s, %s)
-            """, (project_id, flat_no, floor, room_type))
-
-        conn.commit()
+    # GET isteği için: Proje adını ve mevcut daireleri çek
+    try:
+        cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
+        project = cur.fetchone()
+        if not project:
+            flash('Proje bulunamadı.', 'danger')
+            return redirect(url_for('dashboard'))
+        project_name = project[0]
+        
+        # Mevcut daireleri forma doldurmak için çek
+        cur.execute("SELECT block_name, flat_no, floor, room_type FROM flats WHERE project_id = %s ORDER BY block_name, floor, flat_no", (project_id,))
+        existing_flats = cur.fetchall()
+        
+    except Exception as e:
+        flash(f'Veri alınırken bir hata oluştu: {e}', 'danger')
+        project_name = "Bilinmeyen Proje"
+        existing_flats = []
+    finally:
         cur.close()
         conn.close()
 
-        flash('Daireler başarıyla eklendi.', 'success')
-        return redirect(url_for('dashboard'))
+    return render_template('project_flats.html', 
+                           project_id=project_id, 
+                           project_name=project_name,
+                           existing_flats=existing_flats)
 
-    return render_template('project_flats.html', project_id=project_id)
 
 # app.py dosyanıza ekleyin
 
@@ -130,6 +177,8 @@ def add_flats(project_id):
 
 # app.py dosyanızdaki @app.route('/assign_flat_owner', methods=['GET', 'POST']) fonksiyonunu tamamen bu kodla değiştirin
 
+
+# app.py'deki assign_flat_owner fonksiyonunu bununla değiştirin
 
 @app.route('/assign_flat_owner', methods=['GET', 'POST'])
 def assign_flat_owner():
@@ -140,130 +189,160 @@ def assign_flat_owner():
     cur = conn.cursor()
 
     if request.method == 'POST':
-        # project_id ve flat_id int() ile dönüştürüldü
-        project_id = int(request.form.get('project_id'))
-        flat_id = int(request.form.get('flat_id'))
-        customer_option = request.form.get('customer_option') # 'existing' veya 'new'
-
-        customer_id = None
-
-        print(f"DEBUG: POST isteği alındı. project_id: {project_id} (tip: {type(project_id)}), flat_id: {flat_id} (tip: {type(flat_id)}), customer_option: {customer_option}")
-
         try:
+            flat_id = int(request.form.get('flat_id'))
+            customer_option = request.form.get('customer_option')
+            customer_id = None
+
             if customer_option == 'new':
-                # Yeni müşteri ekle
                 new_first_name = request.form.get('new_first_name')
                 new_last_name = request.form.get('new_last_name')
-                new_phone = request.form.get('new_phone')
-                new_national_id = request.form.get('new_national_id')
-
-                print(f"DEBUG: Yeni müşteri seçeneği. Ad: {new_first_name}, Soyad: {new_last_name}")
-
                 if not new_first_name or not new_last_name:
                     flash('Yeni müşteri için ad ve soyad zorunludur.', 'danger')
                     return redirect(url_for('assign_flat_owner'))
-
-                cur.execute("""
-                    INSERT INTO customers (first_name, last_name, phone, national_id)
-                    VALUES (%s, %s, %s, %s)
-                    RETURNING id
-                """, (new_first_name, new_last_name, new_phone, new_national_id))
+                cur.execute(
+                    "INSERT INTO customers (first_name, last_name, phone, national_id) VALUES (%s, %s, %s, %s) RETURNING id",
+                    (new_first_name, new_last_name, request.form.get('new_phone'), request.form.get('new_national_id'))
+                )
                 customer_id = cur.fetchone()[0]
-                conn.commit() # Yeni müşteri ekleme işlemi burada commit ediliyor
+                conn.commit()
                 flash(f'Yeni müşteri "{new_first_name} {new_last_name}" başarıyla eklendi.', 'info')
-                print(f"DEBUG: Yeni müşteri eklendi. customer_id: {customer_id}")
-
+            
             elif customer_option == 'existing':
-                # Mevcut müşteriyi kullan
                 customer_id = request.form.get('customer_id')
-                print(f"DEBUG: Mevcut müşteri seçeneği. customer_id: {customer_id}")
                 if not customer_id:
                     flash('Lütfen mevcut bir müşteri seçin.', 'danger')
                     return redirect(url_for('assign_flat_owner'))
+            
+            if customer_id and flat_id:
+                cur.execute("UPDATE flats SET owner_id = %s WHERE id = %s", (customer_id, flat_id))
+                conn.commit()
+                flash('Daire sahibi başarıyla atandı!', 'success')
             else:
-                flash('Geçersiz müşteri seçeneği.', 'danger')
-                return redirect(url_for('assign_flat_owner'))
-
-            # Dairenin owner_id'sini güncelleme işlemi
-            if customer_id and flat_id and project_id:
-                # Dairenin gerçekten var olup olmadığını kontrol edelim
-                cur.execute("SELECT id FROM flats WHERE id = %s AND project_id = %s", (flat_id, project_id))
-                existing_flat = cur.fetchone()
-
-                if existing_flat:
-                    cur.execute("""
-                        UPDATE flats
-                        SET owner_id = %s
-                        WHERE id = %s AND project_id = %s
-                    """, (customer_id, flat_id, project_id))
-                    
-                    # Kaç satırın etkilendiğini kontrol edelim
-                    rows_updated = cur.rowcount
-                    conn.commit() # Daire atama işlemi burada commit ediliyor
-
-                    if rows_updated > 0:
-                        flash('Daire sahibi başarıyla atandı!', 'success')
-                        print(f"DEBUG: Daireye sahip atandı. Daire ID: {flat_id}, Müşteri ID: {customer_id}")
-                    else:
-                        # Bu durum, dairenin bulunmasına rağmen UPDATE'in etki etmemesi
-                        # (örn: owner_id zaten aynı müşteri ise veya bir kısıtlama varsa)
-                        flash('Daire sahibi atanamadı. Daire zaten bu müşteriye atanmış olabilir veya bir sorun oluştu.', 'warning')
-                        print(f"DEBUG: Daireye sahip atanamadı. Rows updated: {rows_updated}. Daire ID: {flat_id}, Müşteri ID: {customer_id}")
-                else:
-                    flash('Seçilen daire bu projede bulunamadı.', 'danger')
-                    print(f"DEBUG: Daire bulunamadı. Flat ID: {flat_id}, Project ID: {project_id}")
-                
-                # Yönlendirme değiştirildi: Dashboard yerine aynı sayfaya yönlendiriliyor
-                return redirect(url_for('assign_flat_owner')) 
-            else:
-                flash('Daire ataması için gerekli tüm bilgiler sağlanmadı.', 'danger')
-                print("DEBUG: Daire ataması için eksik bilgi (customer_id, flat_id, project_id eksik).")
-                return redirect(url_for('assign_flat_owner'))
+                flash('Gerekli tüm bilgiler sağlanmadı.', 'danger')
+            
+            return redirect(url_for('assign_flat_owner'))
 
         except Exception as e:
-            conn.rollback() # Hata durumunda değişiklikleri geri al
-            flash(f'Daire sahibi ataması sırasında bir hata oluştu: {e}', 'danger')
-            print(f"HATA: Daire ataması sırasında hata: {e}") # Sunucu konsoluna hatayı yazdır
+            conn.rollback()
+            flash(f'Bir hata oluştu: {e}', 'danger')
         finally:
             cur.close()
             conn.close()
 
-    # GET isteği veya POST hatası durumunda formu göstermek için gerekli verileri çek
+    # --- GET İSTEĞİ İÇİN GÜNCELLEME BURADA ---
     projects = []
-    flats_with_owners = [] # Tabloda göstermek için
-    customers = [] # Müşteriler dropdown için tekrar çekiliyor
-
+    flats_data = []
+    customers = []
     try:
         cur.execute("SELECT id, name FROM projects ORDER BY name")
         projects = cur.fetchall()
 
-        # owner_id, first_name, last_name, phone, national_id'yi de çekerek JavaScript'e geçireceğiz
-        # DİKKAT: Sıralama önemli!
+        # YENİ: Sorguya f.block_name eklendi (indeks 7)
         cur.execute("""
-            SELECT f.id, pr.name, f.flat_no, f.floor, 
-                   c.first_name, c.last_name, f.owner_id, c.phone, c.national_id
+            SELECT 
+                f.id, pr.name, f.flat_no, f.floor, 
+                c.first_name, c.last_name, f.owner_id, 
+                f.block_name, c.phone, c.national_id
             FROM flats f
             JOIN projects pr ON f.project_id = pr.id
             LEFT JOIN customers c ON f.owner_id = c.id
-            ORDER BY pr.name, f.floor, f.flat_no
+            ORDER BY pr.name, f.block_name, f.floor, f.flat_no
         """)
-        flats_with_owners = cur.fetchall()
+        flats_data = cur.fetchall()
 
-        # Müşteriler dropdown için çekiliyor
         cur.execute("SELECT id, first_name, last_name FROM customers ORDER BY first_name, last_name")
         customers = cur.fetchall()
 
     except Exception as e:
         flash(f'Veri çekilirken bir hata oluştu: {e}', 'danger')
-        print(f"HATA: Veri çekilirken hata: {e}") # Sunucu konsoluna hatayı yazdır
+    finally:
+        if 'conn' in locals() and not conn.closed:
+            cur.close()
+            conn.close()
+    
+    return render_template('assign_flat_owner.html',
+                           projects=projects,
+                           flats_data=flats_data,
+                           customers=customers,
+                           user_name=session.get('user_name'))
+
+
+# app.py dosyanıza bu iki yeni route'u ekleyin
+
+# app.py dosyanıza bu iki yeni route'u ekleyin
+
+@app.route('/project/<int:project_id>/edit', methods=['GET', 'POST'])
+def edit_project(project_id):
+    """Mevcut bir projeyi düzenler ve daire sayısı artarsa daire ekleme sayfasına yönlendirir."""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    if request.method == 'POST':
+        name = request.form['name']
+        address = request.form['address']
+        project_type = request.form['project_type']
+        total_floors = request.form['total_floors']
+        total_flats = request.form['total_flats']
+        try:
+            cur.execute("""
+                UPDATE projects
+                SET name = %s, address = %s, project_type = %s, total_floors = %s, total_flats = %s
+                WHERE id = %s
+            """, (name, address, project_type, total_floors, total_flats, project_id))
+            conn.commit()
+            
+            # YENİ: Başarılı güncelleme sonrası yönlendirme mantığı
+            flash('Proje başarıyla güncellendi. Şimdi daire bilgilerini gözden geçirebilirsiniz.', 'success')
+            return redirect(url_for('add_flats', project_id=project_id))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f'Proje güncellenirken bir hata oluştu: {e}', 'danger')
+            return redirect(url_for('edit_project', project_id=project_id))
+        finally:
+            cur.close()
+            conn.close()
+
+    # GET isteği için proje verilerini çek
+    cur.execute("SELECT id, name, address, project_type, total_floors, total_flats FROM projects WHERE id = %s", (project_id,))
+    project = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if project is None:
+        flash('Düzenlenecek proje bulunamadı.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    return render_template('edit_project.html', project=project, user_name=session.get('user_name'))
+
+@app.route('/project/<int:project_id>/delete', methods=['POST'])
+def delete_project(project_id):
+    """Bir projeyi ve ona bağlı tüm verileri siler."""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        # Veritabanındaki ON DELETE CASCADE ayarı sayesinde, bu projeye bağlı
+        # tüm daireler, giderler, taksit planları ve ödemeler otomatik olarak silinecektir.
+        cur.execute("DELETE FROM projects WHERE id = %s", (project_id,))
+        conn.commit()
+        flash('Proje ve ilgili tüm veriler başarıyla silindi.', 'success')
+    except Exception as e:
+        conn.rollback()
+        flash(f'Proje silinirken bir hata oluştu: {e}', 'danger')
     finally:
         cur.close()
         conn.close()
     
-    return render_template('assign_flat_owner.html',
-                           projects=projects,
-                           flats_with_owners=flats_with_owners,
-                           customers=customers) # customers değişkeni artık gönderiliyor
+    return redirect(url_for('dashboard'))
+
+
 
 @app.route('/delete_flat_owner_data', methods=['POST'])
 def delete_flat_owner_data():
@@ -403,6 +482,92 @@ def add_expense(project_id):
     return render_template('new_expense.html', project_name=project[0], project_id=project_id)
 
 
+# app.py dosyanıza bu yeni route'u ekleyin
+
+@app.route('/expense/<int:expense_id>/edit', methods=['GET', 'POST'])
+def edit_expense(expense_id):
+    """Belirli bir gideri düzenler."""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    if request.method == 'POST':
+        # Formdan güncellenmiş verileri al
+        title = request.form['title']
+        amount = request.form['amount']
+        expense_date = request.form['expense_date']
+        description = request.form.get('description', '')
+
+        try:
+            # Veritabanında UPDATE sorgusunu çalıştır
+            cur.execute("""
+                UPDATE expenses
+                SET title = %s, amount = %s, expense_date = %s, description = %s
+                WHERE id = %s
+            """, (title, amount, expense_date, description, expense_id))
+            conn.commit()
+            flash('Gider başarıyla güncellendi.', 'success')
+
+            # Güncellemeden sonra doğru proje sayfasına dönebilmek için project_id'yi al
+            cur.execute("SELECT project_id FROM expenses WHERE id = %s", (expense_id,))
+            project_id = cur.fetchone()[0]
+            return redirect(url_for('list_expenses', project_id=project_id))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f'Gider güncellenirken bir hata oluştu: {e}', 'danger')
+        finally:
+            cur.close()
+            conn.close()
+    
+    # GET isteği için: Mevcut gider verilerini çek ve formu doldur
+    cur.execute("SELECT id, project_id, title, amount, expense_date, description FROM expenses WHERE id = %s", (expense_id,))
+    expense = cur.fetchone()
+    cur.close()
+    conn.close()
+    
+    if expense is None:
+        flash('Düzenlenecek gider bulunamadı.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    return render_template('edit_expense.html', expense=expense)
+
+
+# app.py dosyanıza bu yeni route'u ekleyin
+
+@app.route('/expense/<int:expense_id>/delete', methods=['POST'])
+def delete_expense(expense_id):
+    """Belirli bir gideri veritabanından siler."""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    # Silme işleminden sonra doğru proje sayfasına dönebilmek için proje_id'yi formdan alıyoruz.
+    project_id = request.form.get('project_id')
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM expenses WHERE id = %s", (expense_id,))
+        conn.commit()
+        flash('Gider başarıyla silindi.', 'success')
+    except Exception as e:
+        conn.rollback()
+        flash(f'Gider silinirken bir hata oluştu: {e}', 'danger')
+    finally:
+        cur.close()
+        conn.close()
+
+    # Kullanıcıyı silme işlemini yaptığı projenin giderler sayfasına geri yönlendir.
+    if project_id:
+        return redirect(url_for('list_expenses', project_id=project_id))
+    else:
+        # Eğer bir şekilde project_id gelmezse, ana sayfaya yönlendir.
+        return redirect(url_for('dashboard'))
+
+# app.py'deki get_flats_for_project fonksiyonunu bununla değiştirin
+
 @app.route('/api/project/<int:project_id>/flats')
 def get_flats_for_project(project_id):
     if 'user_id' not in session:
@@ -410,20 +575,20 @@ def get_flats_for_project(project_id):
 
     conn = get_connection()
     cur = conn.cursor()
-    # Sadece sahibi olmayan daireleri listeleyelim ki yanlışlıkla üzerine yazılmasın
+    # YENİ: Sorguya `block_name` sütununu ekledik
     cur.execute("""
-        SELECT id, flat_no, floor, room_type 
+        SELECT id, flat_no, floor, room_type, block_name 
         FROM flats 
         WHERE project_id = %s AND owner_id IS NOT NULL
-        ORDER BY floor, flat_no
+        ORDER BY block_name, floor, flat_no
     """, (project_id,))
     flats_raw = cur.fetchall()
     cur.close()
     conn.close()
 
-    flats = [{'id': f[0], 'text': f"Kat: {f[2]}, No: {f[1]} ({f[3]})"} for f in flats_raw]
+    # YENİ: Menüde görünecek metni isteğine göre sadeleştirdik ve blok adını ekledik
+    flats = [{'id': f[0], 'text': f"Blok: {f[4] or 'Belirtilmemiş'}, Kat: {f[2]}, No: {f[1]}"} for f in flats_raw]
     return jsonify(flats)
-
 
 @app.route('/payment_plan/new', methods=['GET', 'POST'])
 def new_payment_plan():
@@ -489,6 +654,8 @@ def new_payment_plan():
     
     return render_template('new_payment_plan.html', projects=projects)
 
+# app.py'deki debt_status fonksiyonunu bununla değiştirin
+
 @app.route('/debts')
 def debt_status():
     if 'user_id' not in session:
@@ -497,7 +664,7 @@ def debt_status():
     conn = get_connection()
     cur = conn.cursor()
 
-    # Tüm taksit planlarını; proje, daire ve müşteri bilgileriyle birlikte çek
+    # YENİ: Sorguya f.block_name sütununu ekledik (11. index)
     cur.execute("""
         SELECT 
             p.name AS project_name,
@@ -510,31 +677,25 @@ def debt_status():
             s.id AS schedule_id,
             s.due_date,
             s.amount,
-            s.is_paid
+            s.is_paid,
+            f.block_name
         FROM installment_schedule s
         JOIN flats f ON s.flat_id = f.id
         JOIN projects p ON f.project_id = p.id
         JOIN customers c ON f.owner_id = c.id
         WHERE f.project_id IN (SELECT id FROM projects WHERE project_type = 'normal')
-        ORDER BY p.name, f.floor, f.flat_no, s.due_date
+        ORDER BY p.name, f.block_name, f.floor, f.flat_no, s.due_date
     """)
     
     installments_raw = cur.fetchall()
 
-    # Dairelerin toplam ödemelerini ayrı bir sorgu ile alıp sözlüğe atalım
-    cur.execute("""
-        SELECT flat_id, COALESCE(SUM(amount), 0) as total_paid
-        FROM payments
-        GROUP BY flat_id
-    """)
+    cur.execute("SELECT flat_id, COALESCE(SUM(amount), 0) as total_paid FROM payments GROUP BY flat_id")
     total_payments_by_flat = dict(cur.fetchall())
     
     cur.close()
     conn.close()
 
-    # Veriyi şablonda kullanmak üzere gruplayalım ve işleyelim
     flats_data = []
-    # Daire ID'sine (flat_id) göre gruplama yap
     for key, group in groupby(installments_raw, key=lambda x: x[3]):
         group_list = list(group)
         first_item = group_list[0]
@@ -543,29 +704,18 @@ def debt_status():
             'flat_id': key,
             'project_name': first_item[0],
             'customer_name': f"{first_item[1]} {first_item[2]}",
-            'flat_details': f"Kat: {first_item[5]}, No: {first_item[4]}",
+            # YENİ: flat_details metnine blok bilgisini ekledik
+            'flat_details': f"Blok: {first_item[11] or 'N/A'}, Kat: {first_item[5]}, No: {first_item[4]}",
             'flat_total_price': first_item[6] or 0,
-            'total_paid': total_payments_by_flat.get(key, 0), # Sözlükten toplam ödemeyi al
+            'total_paid': total_payments_by_flat.get(key, 0),
             'installments': []
         }
         flat_info['remaining_debt'] = flat_info['flat_total_price'] - flat_info['total_paid']
 
         today = date.today()
         for item in group_list:
-            due_date = item[8]
-            is_paid = item[10]
-            status = ""
-            css_class = ""
-
-            if is_paid:
-                status = "Ödendi"
-                css_class = "table-success"
-            elif due_date < today:
-                status = "Gecikmiş"
-                css_class = "table-danger"
-            else:
-                status = "Bekleniyor"
-                css_class = "table-light"
+            due_date, is_paid = item[8], item[10]
+            status, css_class = ("Ödendi", "table-success") if is_paid else (("Gecikmiş", "table-danger") if due_date < today else ("Bekleniyor", "table-light"))
             
             flat_info['installments'].append({
                 'due_date': due_date,
@@ -576,6 +726,8 @@ def debt_status():
         
         flats_data.append(flat_info)
 
+    # user_name'i template'e göndermeyi unutmayalım
+    return render_template('debts.html', flats_data=flats_data, user_name=session.get('user_name'))
     return render_template('debts.html', flats_data=flats_data)
 
 # app.py dosyanıza bu yeni route'u ekleyin
@@ -658,48 +810,37 @@ def print_debt_statement(flat_id):
 
 # app.py dosyanızdaki mevcut list_payments fonksiyonunu bu kodla değiştirin.
 
+# app.py'deki list_payments fonksiyonunu bununla değiştirin
+
 @app.route('/payments')
 def list_payments():
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
-    # GET parametreleri (Filtreleme)
+    # ... (Filtreleme ve sıralama kodları aynı kalıyor) ...
     project = request.args.get('project')
     start = request.args.get('start_date')
     end = request.args.get('end_date')
-    
-    # === YENİ: Sıralama parametreleri ===
-    sort_by = request.args.get('sort_by', 'payment_date') # Varsayılan: tarihe göre sırala
-    order = request.args.get('order', 'desc') # Varsayılan: azalan sırada
+    sort_by = request.args.get('sort_by', 'tarih')
+    order = request.args.get('order', 'desc')
 
-    # Güvenlik için sıralanabilir sütunları beyaz listeye al
     sortable_columns = {
-        'proje': 'pr.name',
-        'musteri': 'c.last_name',
-        'tarih': 'p.payment_date',
-        'tutar': 'p.amount'
+        'proje': 'pr.name', 'musteri': 'c.last_name',
+        'tarih': 'p.payment_date', 'tutar': 'p.amount'
     }
-    
-    # Geçerli bir sıralama sütunu mu kontrol et, değilse varsayılana dön
     order_by_column = sortable_columns.get(sort_by, 'p.payment_date')
-    
-    # Geçerli bir sıralama yönü mü kontrol et
-    if order not in ['asc', 'desc']:
-        order = 'desc'
+    if order not in ['asc', 'desc']: order = 'desc'
 
-    # Base query
+    # YENİ: Sorguya f.block_name sütununu ekledik
     sql = """
         SELECT p.id, pr.name, c.first_name, c.last_name, f.flat_no, f.floor,
-               p.installment, p.amount, p.payment_date
+               p.installment, p.amount, p.payment_date, f.block_name
         FROM payments p
         JOIN flats f ON p.flat_id = f.id
         JOIN customers c ON f.owner_id = c.id
         JOIN projects pr ON f.project_id = pr.id
     """
-    filters = []
-    params = []
-
-    # Filtre ekleyelim
+    filters, params = [], []
     if project:
         filters.append("pr.name = %s")
         params.append(project)
@@ -713,7 +854,6 @@ def list_payments():
     if filters:
         sql += " WHERE " + " AND ".join(filters)
 
-    # === YENİ: Dinamik ORDER BY ifadesi ===
     sql += f" ORDER BY {order_by_column} {order.upper()}"
 
     conn = get_connection()
@@ -721,21 +861,16 @@ def list_payments():
     cur.execute(sql, tuple(params))
     payments = cur.fetchall()
     
-    # Projeler dropdown için
     cur.execute("SELECT name FROM projects ORDER BY name")
     all_projects = [r[0] for r in cur.fetchall()]
     cur.close()
     conn.close()
 
     return render_template('payments.html',
-                           payments=payments,
-                           all_projects=all_projects,
-                           selected_project=project,
-                           start_date=start,
-                           end_date=end,
-                           # === YENİ: Sıralama bilgilerini şablona gönder ===
-                           sort_by=sort_by,
-                           order=order)
+                           payments=payments, all_projects=all_projects,
+                           selected_project=project, start_date=start,
+                           end_date=end, sort_by=sort_by, order=order,
+                           user_name=session.get('user_name'))
 
 @app.route('/reports')
 def reports():
