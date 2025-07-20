@@ -14,6 +14,10 @@
 # ödeme ekleme, ödeme planı oluşturma vs. tüm ilemlerde daire seçerken proje seçtikten sonra sadece daire kat ve daire nosu gösterilerek seçim yapılsın
 # veri ekleme yapılan tüm sayfalrda silme ve düzenleme butonları eklensin
 #
+# git add .
+#  git commit -m "Sayfalarda büyük değişiklikler yapıldı"
+#  git push origin main
+#  git branch
 # --------------------
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify # jsonify import edildiğinden emin olun
 from dateutil.relativedelta import relativedelta # Tarih hesaplamaları için
@@ -884,6 +888,8 @@ def manage_payment_plan(flat_id):
 
 # app.py dosyanıza bu yeni route'u ekleyin
 
+# app.py dosyanızdaki print_debt_statement fonksiyonunu bununla değiştirin.
+
 @app.route('/flat/<int:flat_id>/print')
 def print_debt_statement(flat_id):
     """Belirli bir dairenin borç dökümünü yazdırma için hazırlar."""
@@ -896,8 +902,7 @@ def print_debt_statement(flat_id):
     try:
         # 1. Daire, proje ve müşteri bilgilerini çek
         cur.execute("""
-            SELECT 
-                p.name, c.first_name, c.last_name, f.floor, f.flat_no, f.total_price
+            SELECT p.name, c.first_name, c.last_name, f.floor, f.flat_no, f.total_price, f.block_name
             FROM flats f
             JOIN projects p ON f.project_id = p.id
             JOIN customers c ON f.owner_id = c.id
@@ -909,9 +914,9 @@ def print_debt_statement(flat_id):
             flash('Döküm alınacak daire bulunamadı.', 'danger')
             return redirect(url_for('debt_status'))
 
-        # 2. Daireye ait tüm taksitleri çek
+        # 2. Daireye ait tüm taksitleri çek (paid_amount ile birlikte)
         cur.execute("""
-            SELECT due_date, amount, is_paid
+            SELECT due_date, amount, is_paid, paid_amount
             FROM installment_schedule
             WHERE flat_id = %s
             ORDER BY due_date
@@ -926,7 +931,7 @@ def print_debt_statement(flat_id):
         statement_data = {
             'project_name': statement_info_raw[0],
             'customer_name': f"{statement_info_raw[1]} {statement_info_raw[2]}",
-            'flat_details': f"Kat: {statement_info_raw[3]}, No: {statement_info_raw[4]}",
+            'flat_details': f"Blok: {statement_info_raw[6] or 'N/A'}, Kat: {statement_info_raw[3]}, No: {statement_info_raw[4]}",
             'flat_total_price': statement_info_raw[5] or 0,
             'total_paid': total_paid,
             'remaining_debt': (statement_info_raw[5] or 0) - total_paid,
@@ -935,10 +940,13 @@ def print_debt_statement(flat_id):
         }
 
         today = date.today()
-        for due_date, amount, is_paid in installments_raw:
+        # === GÜNCELLEME BURADA: Kısmi ödeme mantığı eklendi ===
+        for due_date, amount, is_paid, paid_amount in installments_raw:
             status = ""
             if is_paid:
                 status = "Ödendi"
+            elif paid_amount > 0:
+                status = f"Kısmen Ödendi ({paid_amount} ₺)"
             elif due_date < today:
                 status = "Gecikmiş"
             else:
@@ -947,7 +955,8 @@ def print_debt_statement(flat_id):
             statement_data['installments'].append({
                 'due_date': due_date,
                 'amount': amount,
-                'status': status
+                'status': status,
+                'remaining_due': amount - paid_amount
             })
 
         return render_template('print_statement.html', data=statement_data)
