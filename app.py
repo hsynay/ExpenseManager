@@ -15,7 +15,7 @@
 # veri ekleme yapılan tüm sayfalrda silme ve düzenleme butonları eklensin
 #
 # git add .
-#  git commit -m "Sayfalarda büyük değişiklikler yapıldı"
+#  git commit -m "Borç döküm sayfası yenilendi"
 #  git push origin main
 #  git branch
 # --------------------
@@ -183,6 +183,31 @@ def add_flats(project_id):
 
 # app.py dosyanızdaki @app.route('/assign_flat_owner', methods=['GET', 'POST']) fonksiyonunu tamamen bu kodla değiştirin
 
+# app.py dosyanıza bu yeni route'u ekleyin.
+
+@app.route('/expenses/select_project', methods=['GET', 'POST'])
+def select_project_for_expenses():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        project_id = request.form.get('project_id')
+        if project_id:
+            return redirect(url_for('list_expenses', project_id=project_id))
+        else:
+            flash("Lütfen bir proje seçin.", "warning")
+    
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, name FROM projects ORDER BY name")
+    projects = cur.fetchall()
+    cur.close()
+    conn.close()
+    
+    return render_template('select_project_expenses.html', 
+                           projects=projects, 
+                           user_name=session.get('user_name'))
+
 
 # app.py'deki assign_flat_owner fonksiyonunu bununla değiştirin
 @app.route('/assign_flat_owner', methods=['GET', 'POST'])
@@ -267,6 +292,12 @@ def assign_flat_owner():
                            user_name=session.get('user_name'))
 
 
+#app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla değiştirin.
+
+# app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla değiştirin.
+
+# app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla değiştirin.
+
 @app.route('/debts')
 def debt_status():
     if 'user_id' not in session:
@@ -274,13 +305,13 @@ def debt_status():
 
     conn = get_connection()
     cur = conn.cursor()
+    projects_data = []
 
     try:
-        # === YENİ VE GÜÇLÜ SORGULAMA MANTIĞI ===
-        # 1. Sahibi olan TÜM daireleri çek
+        # 1. Sahibi olan TÜM daireleri, proje tipleriyle birlikte çek
         cur.execute("""
             SELECT 
-                f.id, p.name, f.block_name, f.floor, f.flat_no,
+                f.id, p.name, p.project_type, f.block_name, f.floor, f.flat_no,
                 c.first_name, c.last_name, f.total_price
             FROM flats f
             JOIN projects p ON f.project_id = p.id
@@ -293,47 +324,62 @@ def debt_status():
         # 2. Tüm taksitleri bir sözlüğe al (performans için)
         cur.execute("SELECT flat_id, due_date, amount, is_paid, paid_amount FROM installment_schedule ORDER BY due_date ASC")
         all_installments_raw = cur.fetchall()
-        installments_by_flat = {}
-        for flat_id, group in groupby(all_installments_raw, key=lambda x: x[0]):
-            installments_by_flat[flat_id] = list(group)
+        installments_by_flat = {flat_id: list(group) for flat_id, group in groupby(all_installments_raw, key=lambda x: x[0])}
 
         # 3. Tüm ödemeleri bir sözlüğe al (performans için)
         cur.execute("SELECT flat_id, COALESCE(SUM(amount), 0) as total_paid FROM payments GROUP BY flat_id")
         total_payments_by_flat = dict(cur.fetchall())
 
-        # 4. Tüm verileri birleştir
-        flats_data = []
-        today = date.today()
+        # 4. Verileri önce projeye, sonra daireye göre grupla
+        for project_name, project_group in groupby(owned_flats, key=lambda x: x[1]):
+            project_flats_list = []
+            project_type = "" # Proje tipini belirlemek için
+            
+            for flat_id, _, p_type, block_name, floor, flat_no, first_name, last_name, total_price in project_group:
+                project_type = p_type # Grubun ilk elemanından proje tipini al
+                
+                total_paid = total_payments_by_flat.get(flat_id, Decimal(0))
+                flat_dict = {
+                    'flat_id': flat_id,
+                    'customer_name': f"{first_name} {last_name}",
+                    'flat_details': f"Blok: {block_name or 'N/A'}, Kat: {floor}, No: {flat_no}",
+                    'total_paid': total_paid,
+                    'installments': []
+                }
 
-        for flat_id, project_name, block_name, floor, flat_no, first_name, last_name, total_price in owned_flats:
-            flat_info = {
-                'flat_id': flat_id,
+                if project_type == 'normal':
+                    flat_dict['flat_total_price'] = total_price or 0
+                    flat_dict['remaining_debt'] = flat_dict['flat_total_price'] - total_paid
+                    
+                    current_installments = installments_by_flat.get(flat_id, [])
+                    today = date.today()
+                    for _, due_date, total_amount, is_paid, paid_amount in current_installments:
+                        status, css_class = ("Ödendi", "table-success") if is_paid else (f"Kısmen Ödendi", "table-warning") if paid_amount > 0 else ("Gecikmiş", "table-danger") if due_date < today else ("Bekleniyor", "table-light")
+                        flat_dict['installments'].append({
+                            'due_date': due_date, 'total_amount': total_amount, 'paid_amount': paid_amount or 0,
+                            'remaining_installment_due': total_amount - (paid_amount or 0),
+                            'status': status, 'css_class': css_class
+                        })
+                
+                project_flats_list.append(flat_dict)
+
+            projects_data.append({
                 'project_name': project_name,
-                'customer_name': f"{first_name} {last_name}",
-                'flat_details': f"Blok: {block_name or 'N/A'}, Kat: {floor}, No: {flat_no}",
-                'flat_total_price': total_price or 0,
-                'total_paid': total_payments_by_flat.get(flat_id, Decimal(0)),
-                'installments': []
-            }
-            flat_info['remaining_debt'] = flat_info['flat_total_price'] - flat_info['total_paid']
-
-            current_installments = installments_by_flat.get(flat_id, [])
-            for _, due_date, total_amount, is_paid, paid_amount in current_installments:
-                status, css_class = ("Ödendi", "table-success") if is_paid else (f"Kısmen Ödendi ({paid_amount} ₺)", "table-warning") if paid_amount > 0 else ("Gecikmiş", "table-danger") if due_date < today else ("Bekleniyor", "table-light")
-                flat_info['installments'].append({
-                    'total_amount': total_amount, 'remaining_installment_due': total_amount - paid_amount,
-                    'due_date': due_date, 'status': status, 'css_class': css_class
-                })
-            flats_data.append(flat_info)
+                'project_type': project_type,
+                'flats': project_flats_list
+            })
 
     except Exception as e:
         flash(f'Borç durumu sayfası yüklenirken bir hata oluştu: {e}', 'danger')
-        flats_data = []
+        projects_data = []
     finally:
         cur.close()
         conn.close()
 
-    return render_template('debts.html', flats_data=flats_data, user_name=session.get('user_name'))
+    return render_template('debts.html', 
+                           projects_data=projects_data, 
+                           user_name=session.get('user_name'))
+
 
 
 # app.py dosyanıza bu iki yeni route'u ekleyin
@@ -459,7 +505,31 @@ def delete_flat_owner_data():
         cur.close()
         conn.close()
 
+@app.route('/customers')
+def list_customers():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
 
+    conn = get_connection()
+    cur = conn.cursor()
+    
+    cur.execute("""
+        SELECT 
+            c.id, c.first_name, c.last_name, c.phone, c.national_id,
+            COUNT(f.id) as flat_count
+        FROM customers c
+        LEFT JOIN flats f ON c.id = f.owner_id
+        GROUP BY c.id
+        ORDER BY c.first_name, c.last_name
+    """)
+    customers = cur.fetchall()
+    
+    cur.close()
+    conn.close()
+
+    return render_template('customers.html', 
+                           customers=customers, 
+                           user_name=session.get('user_name')) 
 # app.py dosyanıza bu iki yeni route'u ekleyin
 
 @app.route('/project/<int:project_id>/expenses')
@@ -636,27 +706,42 @@ def delete_expense(expense_id):
 
 # app.py'deki get_flats_for_project fonksiyonunu bununla değiştirin
 
+# app.py dosyanızdaki get_flats_for_project fonksiyonunu bununla değiştirin.
+
 @app.route('/api/project/<int:project_id>/flats')
 def get_flats_for_project(project_id):
+    """
+    Bir projeye ait, sahibi olan daireleri listeler.
+    Daire metninde blok, kat, no ve sahip ismini içerir.
+    """
     if 'user_id' not in session:
         return jsonify({'error': 'Yetkisiz erişim'}), 401
 
     conn = get_connection()
     cur = conn.cursor()
-    # YENİ: Sorguya `block_name` sütununu ekledik
+    
+    # YENİ: Sorguya `customers` tablosu eklendi (JOIN ile)
     cur.execute("""
-        SELECT id, flat_no, floor, room_type, block_name 
-        FROM flats 
-        WHERE project_id = %s AND owner_id IS NOT NULL
-        ORDER BY block_name, floor, flat_no
+        SELECT 
+            f.id, f.flat_no, f.floor, f.room_type, f.block_name,
+            c.first_name, c.last_name
+        FROM flats f
+        JOIN customers c ON f.owner_id = c.id
+        WHERE f.project_id = %s AND f.owner_id IS NOT NULL
+        ORDER BY f.block_name, f.floor, f.flat_no
     """, (project_id,))
     flats_raw = cur.fetchall()
     cur.close()
     conn.close()
 
-    # YENİ: Menüde görünecek metni isteğine göre sadeleştirdik ve blok adını ekledik
-    flats = [{'id': f[0], 'text': f"Blok: {f[4] or 'Belirtilmemiş'}, Kat: {f[2]}, No: {f[1]}"} for f in flats_raw]
+    # YENİ: Daire metnine sahip adı eklendi
+    flats = [{
+        'id': f[0], 
+        'text': f"Blok: {f[4] or 'N/A'}, Kat: {f[2]}, No: {f[1]}  —  ({f[5]} {f[6]})"
+    } for f in flats_raw]
+    
     return jsonify(flats)
+
 """
 @app.route('/payment_plan/new', methods=['GET', 'POST'])
 def new_payment_plan():
@@ -973,18 +1058,23 @@ def print_debt_statement(flat_id):
 
 # app.py'deki list_payments fonksiyonunu bununla değiştirin
 
+# app.py dosyanızdaki mevcut list_payments fonksiyonunu bu kodla değiştirin.
+
 @app.route('/payments')
 def list_payments():
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
-    # ... (Filtreleme ve sıralama kodları aynı kalıyor) ...
+    # Filtreleme parametreleri
     project = request.args.get('project')
     start = request.args.get('start_date')
     end = request.args.get('end_date')
+    customer_id = request.args.get('customer_id') # === YENİ: Müşteri ID'sini al ===
+    
+    # Sıralama parametreleri
     sort_by = request.args.get('sort_by', 'tarih')
     order = request.args.get('order', 'desc')
-
+    
     sortable_columns = {
         'proje': 'pr.name', 'musteri': 'c.last_name',
         'tarih': 'p.payment_date', 'tutar': 'p.amount'
@@ -992,7 +1082,7 @@ def list_payments():
     order_by_column = sortable_columns.get(sort_by, 'p.payment_date')
     if order not in ['asc', 'desc']: order = 'desc'
 
-    # YENİ: Sorguya f.block_name sütununu ekledik
+    # Ana SQL sorgusu
     sql = """
         SELECT p.id, pr.name, c.first_name, c.last_name, f.flat_no, f.floor,
                p.installment, p.amount, p.payment_date, f.block_name
@@ -1002,6 +1092,8 @@ def list_payments():
         JOIN projects pr ON f.project_id = pr.id
     """
     filters, params = [], []
+
+    # Filtreleri sorguya ekle
     if project:
         filters.append("pr.name = %s")
         params.append(project)
@@ -1011,6 +1103,10 @@ def list_payments():
     if end:
         filters.append("p.payment_date <= %s")
         params.append(end)
+    # === YENİ: Müşteri filtresini sorguya ekle ===
+    if customer_id:
+        filters.append("c.id = %s")
+        params.append(customer_id)
 
     if filters:
         sql += " WHERE " + " AND ".join(filters)
@@ -1024,14 +1120,27 @@ def list_payments():
     
     cur.execute("SELECT name FROM projects ORDER BY name")
     all_projects = [r[0] for r in cur.fetchall()]
+    
+    # === YENİ: Müşteri listesini dropdown için çek ===
+    cur.execute("SELECT id, first_name, last_name FROM customers ORDER BY first_name, last_name")
+    all_customers = cur.fetchall()
+    
     cur.close()
     conn.close()
 
     return render_template('payments.html',
-                           payments=payments, all_projects=all_projects,
-                           selected_project=project, start_date=start,
-                           end_date=end, sort_by=sort_by, order=order,
+                           payments=payments,
+                           all_projects=all_projects,
+                           all_customers=all_customers, # === YENİ ===
+                           selected_project=project,
+                           selected_customer_id=customer_id, # === YENİ ===
+                           start_date=start,
+                           end_date=end,
+                           sort_by=sort_by,
+                           order=order,
                            user_name=session.get('user_name'))
+
+# app.py dosyanızdaki mevcut reports fonksiyonunu bu kodla değiştirin.
 
 @app.route('/reports')
 def reports():
@@ -1040,71 +1149,71 @@ def reports():
 
     conn = get_connection()
     cur = conn.cursor()
+    today = date.today()
 
-    # 1. Tüm projeleri çek
-    cur.execute("SELECT id, name, project_type FROM projects ORDER BY name")
-    projects = cur.fetchall()
+    try:
+        cur.execute("SELECT id, name, project_type FROM projects ORDER BY name")
+        projects = cur.fetchall()
+        project_summaries = []
 
-    project_summaries = []
-    for project_id, project_name, project_type in projects:
-        summary = {
-            'project_id': project_id,
-            'project_name': project_name,
-            'project_type': project_type
-        }
+        for project_id, project_name, project_type in projects:
+            summary = {
+                'project_id': project_id,
+                'project_name': project_name,
+                'project_type': project_type
+            }
 
-        if project_type == 'normal':
-            # Normal projeler için finansal verileri hesapla
-            # Planlanan Toplam Gelir (Ödeme planlarındaki tüm taksitlerin toplamı)
-            cur.execute("""
-                SELECT COALESCE(SUM(s.amount), 0) FROM installment_schedule s
-                JOIN flats f ON s.flat_id = f.id WHERE f.project_id = %s
-            """, (project_id,))
-            planned_revenue = cur.fetchone()[0]
-
-            # Tahsil Edilen Toplam Gelir (Ödemeler tablosu)
-            cur.execute("""
-                SELECT COALESCE(SUM(p.amount), 0) FROM payments p
-                JOIN flats f ON p.flat_id = f.id WHERE f.project_id = %s
-            """, (project_id,))
-            collected_revenue = cur.fetchone()[0]
+            # --- YENİ EKLENEN ORTAK BİLGİLER ---
+            cur.execute("SELECT COUNT(id) FROM flats WHERE project_id = %s", (project_id,))
+            summary['total_flats'] = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(id) FROM flats WHERE project_id = %s AND owner_id IS NOT NULL", (project_id,))
+            summary['assigned_flats'] = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(id) FROM expenses WHERE project_id = %s", (project_id,))
+            summary['expense_count'] = cur.fetchone()[0]
             
-            # Toplam Gider
-            cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
-            total_expenses = cur.fetchone()[0]
+            if project_type == 'normal':
+                # --- MEVCUT FİNANSAL BİLGİLER ---
+                cur.execute("SELECT COALESCE(SUM(s.amount), 0) FROM installment_schedule s JOIN flats f ON s.flat_id = f.id WHERE f.project_id = %s", (project_id,))
+                planned_revenue = cur.fetchone()[0]
+                cur.execute("SELECT COALESCE(SUM(p.amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id WHERE f.project_id = %s", (project_id,))
+                collected_revenue = cur.fetchone()[0]
+                cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
+                total_expenses = cur.fetchone()[0]
+                summary.update({
+                    'planned_revenue': planned_revenue,
+                    'collected_revenue': collected_revenue,
+                    'outstanding_debt': planned_revenue - collected_revenue,
+                    'progress_percentage': (collected_revenue / planned_revenue * 100) if planned_revenue > 0 else 0,
+                    'total_expenses': total_expenses,
+                    'net_cash_flow': collected_revenue - total_expenses
+                })
+                
+                # --- YENİ EKLENEN NORMAL PROJE BİLGİLERİ ---
+                cur.execute("SELECT COUNT(s.id) FROM installment_schedule s JOIN flats f ON s.flat_id = f.id WHERE f.project_id = %s AND s.is_paid = TRUE", (project_id,))
+                summary['paid_installments'] = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(s.id) FROM installment_schedule s JOIN flats f ON s.flat_id = f.id WHERE f.project_id = %s AND s.is_paid = FALSE AND s.due_date < %s", (project_id, today))
+                summary['overdue_installments'] = cur.fetchone()[0]
 
-            summary.update({
-                'planned_revenue': planned_revenue,
-                'collected_revenue': collected_revenue,
-                'outstanding_debt': planned_revenue - collected_revenue,
-                'progress_percentage': (collected_revenue / planned_revenue * 100) if planned_revenue > 0 else 0,
-                'total_expenses': total_expenses,
-                'net_cash_flow': collected_revenue - total_expenses
-            })
-
-        elif project_type == 'cooperative':
-            # Kooperatif projeler için finansal verileri hesapla
-            # Üyelerden Toplanan (Ödemeler tablosu)
-            cur.execute("""
-                SELECT COALESCE(SUM(p.amount), 0) FROM payments p
-                JOIN flats f ON p.flat_id = f.id WHERE f.project_id = %s
-            """, (project_id,))
-            member_contributions = cur.fetchone()[0]
-
-            # Toplam Gider
-            cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
-            total_expenses = cur.fetchone()[0]
+            elif project_type == 'cooperative':
+                # --- MEVCUT FİNANSAL BİLGİLER ---
+                cur.execute("SELECT COALESCE(SUM(p.amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id WHERE f.project_id = %s", (project_id,))
+                member_contributions = cur.fetchone()[0]
+                cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
+                total_expenses = cur.fetchone()[0]
+                summary.update({
+                    'member_contributions': member_contributions,
+                    'total_expenses': total_expenses,
+                    'cash_balance': member_contributions - total_expenses
+                })
             
-            summary.update({
-                'member_contributions': member_contributions,
-                'total_expenses': total_expenses,
-                'cash_balance': member_contributions - total_expenses
-            })
-        
-        project_summaries.append(summary)
+            project_summaries.append(summary)
 
-    cur.close()
-    conn.close()
+    except Exception as e:
+        flash(f"Raporlar oluşturulurken bir hata oluştu: {e}", "danger")
+        project_summaries = []
+    finally:
+        cur.close()
+        conn.close()
 
     return render_template('reports.html', 
                            project_summaries=project_summaries,
