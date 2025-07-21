@@ -11,63 +11,62 @@
 </head>
 <body>
     <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark fixed-top shadow">
-        <div class="container">
-            <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}">
-                <i class="fa-solid fa-building"></i> KONAK
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
-                            <i class="fa-solid fa-home me-1"></i>Ana Sayfa
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'new_payment' %}active{% endif %}" href="{{ url_for('new_payment') }}">
-                            <i class="fa-solid fa-plus me-1"></i>Yeni Ödeme
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'reports' %}active{% endif %}" href="{{ url_for('reports') }}">
-                            <i class="fa-solid fa-chart-line me-1"></i>Raporlar
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'debt_status' %}active{% endif %}" href="{{ url_for('debt_status') }}">
-                            <i class="fa-solid fa-exclamation-triangle me-1"></i>Borçlar
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'list_payments' %}active{% endif %}" href="{{ url_for('list_payments') }}">
-                            <i class="fa-solid fa-list me-1"></i>Tüm Ödemeler
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'new_project' %}active{% endif %}" href="{{ url_for('new_project') }}">
-                            <i class="fa-solid fa-users me-1"></i>Yeni Proje
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'assign_flat_owner' %}active{% endif %}" href="{{ url_for('assign_flat_owner') }}">
-                            <i class="fa-solid fa-briefcase me-1"></i>Daire Atama
-                        </a>
-                    </li>
-                </ul>
-                <div class="d-flex align-items-center">
-                    <span class="me-3">
-                        <i class="fa-solid fa-user me-1"></i>{{ user_name or session.user_name }}
-                    </span>
-                    <a href="{{ url_for('logout') }}" class="btn btn-danger btn-sm">
-                        <i class="fa-solid fa-sign-out-alt me-1"></i>Çıkış
+<nav class="navbar navbar-expand-lg navbar-dark fixed-top shadow">
+    <div class="container">
+        <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}"><i class="fa-solid fa-building"></i> KONAK</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"><span class="navbar-toggler-icon"></span></button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><i class="fa-solid fa-home me-1"></i>Ana Panel</a>
+                </li>
+
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_project', 'assign_flat_owner'] %}active{% endif %}" href="#" id="projectDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fa-solid fa-folder-tree me-1"></i> Projeler
                     </a>
-                </div>
+                    <ul class="dropdown-menu" aria-labelledby="projectDropdown">
+                        <li><a class="dropdown-item" href="{{ url_for('new_project') }}">Yeni Proje Ekle</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('assign_flat_owner') }}">Daire Sahibi Ata</a></li>
+                    </ul>
+                </li>
+
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_payment', 'list_payments', 'debt_status', 'select_project_for_expenses'] %}active{% endif %}" href="#" id="financialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fa-solid fa-coins me-1"></i> Finansal
+                    </a>
+                    <ul class="dropdown-menu" aria-labelledby="financialDropdown">
+                        <li><a class="dropdown-item" href="{{ url_for('new_payment') }}">Yeni Ödeme Ekle</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('list_payments') }}">Tüm Ödemeler</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('debt_status') }}">Borç Durumu</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="{{ url_for('select_project_for_expenses') }}">Proje Giderleri</a></li>
+                    </ul>
+                </li>
+                
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['list_customers'] %}active{% endif %}" href="#" id="adminDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fa-solid fa-users-cog me-1"></i> Yönetim
+                    </a>
+                    <ul class="dropdown-menu" aria-labelledby="adminDropdown">
+                        <li><a class="dropdown-item" href="{{ url_for('list_customers') }}">Müşteriler</a></li>
+                    </ul>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'reports' %}active{% endif %}" href="{{ url_for('reports') }}"><i class="fa-solid fa-chart-pie me-1"></i>Raporlar</a>
+                </li>
+            </ul>
+            <div class="d-flex align-items-center">
+                {% if session.user_name %}
+                <span class="me-3 text-white"><i class="fa-solid fa-user me-1"></i>{{ session.user_name }}</span>
+                <a href="{{ url_for('logout') }}" class="btn btn-danger btn-sm"><i class="fa-solid fa-sign-out-alt me-1"></i>Çıkış</a>
+                {% endif %}
             </div>
         </div>
-    </nav>
+    </div>
+</nav>
+
 
     <!-- Main Content -->
     <div class="container my-5">
