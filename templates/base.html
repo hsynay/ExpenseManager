@@ -41,6 +41,7 @@
                         <li><a class="dropdown-item" href="{{ url_for('debt_status') }}">Borç Durumu</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="{{ url_for('select_project_for_expenses') }}">Proje Giderleri</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('list_checks') }}">Çek Takibi</a></li>
                     </ul>
                 </li>
                 
@@ -53,9 +54,14 @@
                     </ul>
                 </li>
 
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'reports' %}active{% endif %}" href="{{ url_for('reports') }}"><i class="fa-solid fa-chart-pie me-1"></i>Raporlar</a>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['reports', 'select_project_for_coop_report'] %}active{% endif %}" href="#" id="reportsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fa-solid fa-chart-pie me-1"></i> Raporlar</a>
+                    <ul class="dropdown-menu" aria-labelledby="reportsDropdown">
+                        <li><a class="dropdown-item" href="{{ url_for('reports') }}">Genel Finansal Raporlar</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('select_project_for_coop_report') }}">Kooperatif Aylık Raporu</a></li>
+                        </ul>
                 </li>
+
             </ul>
             <div class="d-flex align-items-center">
                 {% if session.user_name %}

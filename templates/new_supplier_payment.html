@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Yeni Tedarikçi Ödemesi{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="fw-bold"><i class="fa-solid fa-arrow-up-from-bracket me-2 text-danger"></i>Yeni Tedarikçi Ödemesi</h2>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Ana sayfaya dön</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% for category, msg in messages %}
+            <div class="alert alert-{{ category }} d-flex align-items-center mb-4"><i class="fa-solid fa-circle-exclamation me-2"></i>{{ msg }}</div>
+          {% endfor %}
+        {% endwith %}
+
+        <div class="card">
+            <div class="card-body p-4">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="supplier_id" class="form-label fw-semibold">Tedarikçi / Taşeron (*)</label>
+                        <select class="form-select" id="supplier_id" name="supplier_id" required>
+                            <option value="" selected disabled>Tedarikçi seçin...</option>
+                            {% for supplier in suppliers %}
+                            <option value="{{ supplier[0] }}">{{ supplier[1] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="project_id" class="form-label fw-semibold">Ödemenin Ait Olduğu Proje (*)</label>
+                        <select class="form-select" id="project_id" name="project_id" required>
+                            <option value="" selected disabled>Proje seçin...</option>
+                            {% for project in projects %}
+                            <option value="{{ project[0] }}">{{ project[1] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="amount" class="form-label fw-semibold">Ödeme Tutarı (₺) (*)</label>
+                            <input type="number" step="0.01" class="form-control" id="amount" name="amount" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="payment_date" class="form-label fw-semibold">Ödeme Tarihi (*)</label>
+                            <input type="date" class="form-control" id="payment_date" name="payment_date" required>
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
+                        <a href="{{ url_for('dashboard') }}" class="btn btn-secondary px-4"><i class="fa-solid fa-times me-2"></i>İptal</a>
+                        <button type="submit" class="btn btn-success px-4"><i class="fa-solid fa-save me-2"></i>Ödemeyi Kaydet</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('payment_date').value = today;
+    });
+</script>
+{% endblock %}
