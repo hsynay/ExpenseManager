@@ -1,66 +1,80 @@
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <style>
-        body { background-color: #f8f9fa; padding-top: 76px; }
-        .card { border: none; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); transition: transform 0.2s ease-in-out; }
-        .card:hover { transform: translateY(-5px); }
-        .navbar { background-color: #343a40 !important; }
-        .navbar .nav-link, .navbar-brand, .navbar span { color: white !important; }
-        .navbar .btn-danger { margin-left: 1rem; }
-    </style>
-    {% block extra_head %}
+{% extends "base.html" %}
+
+{% block title %}Ana Panel{% endblock %}
+
+{% block extra_head %}
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    {% endblock %}
-</head>
-<body>
-    
-    <nav class="navbar navbar-expand-lg navbar-dark fixed-top shadow">
-        <div class="container">
-            <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}"><i class="fa-solid fa-building"></i> KONAK</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"><span class="navbar-toggler-icon"></span></button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item"><a class="nav-link active" href="{{ url_for('dashboard') }}"><i class="fa-solid fa-home me-1"></i>Ana Sayfa</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('new_payment') }}"><i class="fa-solid fa-plus me-1"></i>Yeni Ödeme</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('reports') }}"><i class="fa-solid fa-chart-line me-1"></i>Raporlar</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('debt_status') }}"><i class="fa-solid fa-exclamation-triangle me-1"></i>Borçlar</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('list_payments') }}"><i class="fa-solid fa-list me-1"></i>Tüm Ödemeler</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('new_project') }}"><i class="fa-solid fa-users me-1"></i>Yeni Proje</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('assign_flat_owner') }}"><i class="fa-solid fa-briefcase me-1"></i>Daire Atama</a></li>
-                </ul>
-                <div class="d-flex align-items-center">
-                    <span class="me-3 text-white"><i class="fa-solid fa-user me-1"></i>{{ user_name }}</span>
-                    <a href="{{ url_for('logout') }}" class="btn btn-danger btn-sm"><i class="fa-solid fa-sign-out-alt me-1"></i>Çıkış</a>
-                </div>
+{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header bg-dark text-white"><h5 class="mb-0"><i class="fa-solid fa-chart-line me-2"></i>Bu Ayın Nakit Akışı</h5></div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2"><span><i class="fa-solid fa-arrow-up text-success"></i> Beklenen Gelir</span><strong class="text-success fs-5">{{ "%.2f"|format(monthly_cash_flow.income) }} ₺</strong></div>
+                <div class="d-flex justify-content-between align-items-center mb-3"><span><i class="fa-solid fa-arrow-down text-danger"></i> Planlanan Gider</span><strong class="text-danger fs-5">{{ "%.2f"|format(monthly_cash_flow.expense) }} ₺</strong></div>
+                <hr>
+                <div class="d-flex justify-content-between align-items-center fw-bold"><span>Net Nakit Akışı</span><span class="fs-4 {% if monthly_cash_flow.net < 0 %}text-danger{% else %}text-success{% endif %}">{{ "%.2f"|format(monthly_cash_flow.net) }} ₺</span></div>
             </div>
         </div>
-    </nav>
 
-    <div class="container my-5">
-        <h3 class="my-4 fw-bold">📊 Genel Görünüm</h3>
-        <div class="row g-4">
-            <div class="col-6 col-md-3"><div class="card text-center p-4 bg-light"><i class="fa-solid fa-users fa-2x text-primary mb-2"></i><h6 class="text-muted">Müşteri</h6><h4 class="fw-bold">{{ total_customers }}</h4></div></div>
-            <div class="col-6 col-md-3"><div class="card text-center p-4 bg-light"><i class="fa-solid fa-building fa-2x text-success mb-2"></i><h6 class="text-muted">Daire</h6><h4 class="fw-bold">{{ total_flats }}</h4></div></div>
-            <div class="col-6 col-md-3"><div class="card text-center p-4 bg-light"><i class="fa-solid fa-money-check-dollar fa-2x text-warning mb-2"></i><h6 class="text-muted">Ödeme Sayısı</h6><h4 class="fw-bold">{{ total_payments }}</h4></div></div>
-            <div class="col-6 col-md-3"><div class="card text-center p-4 bg-light"><i class="fa-solid fa-sack-dollar fa-2x text-danger mb-2"></i><h6 class="text-muted">Toplam Tutar</h6><h4 class="fw-bold">{{ "%.2f"|format(total_amount) }} ₺</h4></div></div>
+        <div class="card mb-4">
+            <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="fa-solid fa-triangle-exclamation me-2"></i>Geciken Müşteri Ödemeleri ({{ overdue_customer_payments|length }})</h5></div>
+            <ul class="list-group list-group-flush">
+                {% for fn, ln, due_date, remaining in overdue_customer_payments %}<li class="list-group-item d-flex justify-content-between align-items-center"><div><strong>{{ fn }} {{ ln }}</strong><br><small class="text-muted">{{ due_date.strftime('%d.%m.%Y') }}</small></div><span class="badge bg-danger rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span></li>{% else %}<li class="list-group-item text-center text-muted p-3">Gecikmiş müşteri ödemesi yok.</li>{% endfor %}
+            </ul>
         </div>
 
-        <h3 class="my-4 pt-4 fw-bold">📈 Aylık Tahsilat Grafiği (Son 12 Ay)</h3>
-        <div class="card">
-          <div class="card-body p-4">
-              <div style="height: 250px;"> <canvas id="monthlyPaymentsChart"></canvas>
-              </div>
-          </div>
+        <div class="card mb-4">
+            <div class="card-header bg-warning text-dark"><h5 class="mb-0"><i class="fa-solid fa-clock me-2"></i>Yaklaşan Müşteri Ödemeleri ({{ upcoming_customer_payments|length }})</h5></div>
+            <ul class="list-group list-group-flush">
+                {% for fn, ln, due_date, remaining in upcoming_customer_payments %}<li class="list-group-item d-flex justify-content-between align-items-center"><div><strong>{{ fn }} {{ ln }}</strong><br><small class="text-muted">{{ due_date.strftime('%d.%m.%Y') }}</small></div><span class="badge bg-warning text-dark rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span></li>{% else %}<li class="list-group-item text-center text-muted p-3">Yaklaşan müşteri ödemesi yok.</li>{% endfor %}
+            </ul>
         </div>
         
-        <h3 class="my-4 pt-4 fw-bold">🏗️ Projeler</h3>
+        <div class="card mb-4">
+            <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="fa-solid fa-arrow-up-from-bracket me-2"></i>Geciken Gider Ödemeleri ({{ overdue_expense_payments|length }})</h5></div>
+            <ul class="list-group list-group-flush">
+                {% for s_name, due_date, remaining, p_name in overdue_expense_payments %}<li class="list-group-item d-flex justify-content-between align-items-center"><div><strong>{{ s_name }}</strong><br><small class="text-muted">{{ p_name }}</small></div><span class="badge bg-danger rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span></li>{% else %}<li class="list-group-item text-center text-muted p-3">Gecikmiş gider ödemesi yok.</li>{% endfor %}
+            </ul>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header bg-warning text-dark"><h5 class="mb-0"><i class="fa-solid fa-hourglass-start me-2"></i>Yaklaşan Gider Ödemeleri ({{ upcoming_expense_payments|length }})</h5></div>
+            <ul class="list-group list-group-flush">
+                {% for s_name, due_date, remaining, p_name in upcoming_expense_payments %}<li class="list-group-item d-flex justify-content-between align-items-center"><div><strong>{{ s_name }}</strong><br><small class="text-muted">{{ p_name }}</small></div><span class="badge bg-warning text-dark rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span></li>{% else %}<li class="list-group-item text-center text-muted p-3">Yaklaşan gider ödemesi yok.</li>{% endfor %}
+            </ul>
+        </div>
+
         <div class="card">
+             <div class="card-header"><h5 class="mb-0"><i class="fa-solid fa-money-check-dollar me-2"></i>Vadesi Yaklaşan Çekler (30 Gün)</h5></div>
+             <div class="card-body">
+                <h6><i class="fa-solid fa-arrow-down text-success"></i> Alınacak Çekler</h6>
+                <ul class="list-group list-group-flush mb-3">
+                    {% for due_date, amount, c_name in upcoming_incoming_checks %}<li class="list-group-item d-flex justify-content-between align-items-center"><span>{{ c_name }}</span> <span>{{ due_date.strftime('%d.%m.%Y') }} - <strong class="text-success">{{ "%.2f"|format(amount) }} ₺</strong></span></li>{% else %}<li class="list-group-item text-muted text-center">Yaklaşan müşteri çeki yok.</li>{% endfor %}
+                </ul>
+                <h6><i class="fa-solid fa-arrow-up text-danger"></i> Verilecek Çekler</h6>
+                <ul class="list-group list-group-flush">
+                    {% for due_date, amount, s_name in upcoming_outgoing_checks %}<li class="list-group-item d-flex justify-content-between align-items-center"><span>{{ s_name }}</span> <span>{{ due_date.strftime('%d.%m.%Y') }} - <strong class="text-danger">{{ "%.2f"|format(amount) }} ₺</strong></span></li>{% else %}<li class="list-group-item text-muted text-center">Yaklaşan firma çeki yok.</li>{% endfor %}
+                </ul>
+             </div>
+        </div>
+
+    </div>
+
+    <div class="col-lg-8">
+        <div class="row g-4 mb-4">
+            <div class="col-6"><div class="card text-center p-3"><i class="fa-solid fa-users fa-2x text-primary mb-2"></i><h6 class="text-muted small">Toplam Müşteri</h6><h4 class="fw-bold">{{ total_customers }}</h4></div></div>
+            <div class="col-6"><div class="card text-center p-3"><i class="fa-solid fa-building fa-2x text-success mb-2"></i><h6 class="text-muted small">Toplam Daire</h6><h4 class="fw-bold">{{ total_flats }}</h4></div></div>
+        </div>
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Aylık Tahsilat Grafiği (Son 12 Ay)</h5></div>
+            <div class="card-body p-4"><div style="height: 250px;"><canvas id="monthlyPaymentsChart"></canvas></div></div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">Projeler</h5></div>
             <div class="card-body">
                 <div class="list-group">
                     {% for project in projects %}
@@ -69,87 +83,57 @@
                             <h5 class="mb-1">{{ project.name }}</h5>
                             <small class="badge {% if project.project_type == 'normal' %} bg-primary {% else %} bg-success {% endif %}">{{ project.project_type }}</small>
                         </div>
-                        
                         <div class="btn-group" role="group">
                             <a href="{{ url_for('list_expenses', project_id=project.id) }}" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-file-invoice-dollar me-1"></i> Giderler</a>
                             <a href="{{ url_for('edit_project', project_id=project.id) }}" class="btn btn-outline-warning btn-sm"><i class="fa-solid fa-pencil me-1"></i> Düzenle</a>
                             <form action="{{ url_for('delete_project', project_id=project.id) }}" method="POST" class="d-inline">
-                                <button type="submit" class="btn btn-outline-danger btn-sm" 
-                                        onclick="return confirm('Bu projeyi silmek istediğinizden emin misiniz?\n\nDİKKAT: Bu projeye ait TÜM daireler, ödemeler, taksit planları ve giderler KALICI olarak silinecektir! Bu işlem geri alınamaz.')">
-                                    <i class="fa-solid fa-trash-alt me-1"></i> Sil
-                                </button>
+                                <button type="submit" class="btn btn-outline-danger btn-sm" onclick="return confirm('Bu projeyi ve tüm alt verilerini silmek istediğinizden emin misiniz?')"><i class="fa-solid fa-trash-alt me-1"></i> Sil</button>
                             </form>
                         </div>
                     </div>
                     {% else %}
-                    <p class="text-center text-muted p-3">Henüz proje oluşturulmamış. <a href="{{ url_for('new_project') }}">Yeni bir proje ekleyin.</a></p>
+                    <p class="text-center text-muted p-3">Henüz proje oluşturulmamış.</p>
                     {% endfor %}
                 </div>
             </div>
         </div>
     </div>
-    
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            fetch('/api/monthly_payments')
-                .then(response => response.json())
-                .then(apiData => {
-                    const ctx = document.getElementById('monthlyPaymentsChart').getContext('2d');
-                    const turkishLabels = apiData.labels.map(isoDateString => {
-                        const date = new Date(isoDateString);
-                        return date.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
-                    });
-                    new Chart(ctx, {
-                        type: 'bar',
-                        data: {
-                            labels: turkishLabels,
-                            datasets: [{
-                                label: 'Aylık Tahsilat (₺)',
-                                data: apiData.data,
-                                backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                                borderColor: 'rgba(54, 162, 235, 1)',
-                                borderWidth: 1,
-                                borderRadius: 5
-                            }]
-                        },
-                        options: {
-                            maintainAspectRatio: false,
-                            responsive: true,
-                            scales: {
-                                y: {
-                                    beginAtZero: true,
-                                    ticks: {
-                                        callback: function(value) {
-                                            return new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(value);
-                                        }
-                                    }
-                                }
-                            },
-                            plugins: {
-                                legend: {
-                                    display: false
-                                },
-                                tooltip: {
-                                    callbacks: {
-                                        label: function(context) {
-                                            let label = context.dataset.label || '';
-                                            if (label) {
-                                                label += ': ';
-                                            }
-                                            if (context.parsed.y !== null) {
-                                                label += new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(context.parsed.y);
-                                            }
-                                            return label;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
-                })
-                .catch(error => console.error('Grafik verisi yüklenirken hata oluştu:', error));
-        });
-    </script>
-</body>
-</html>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        fetch('/api/monthly_payments')
+            .then(response => response.json())
+            .then(apiData => {
+                const ctx = document.getElementById('monthlyPaymentsChart').getContext('2d');
+                const turkishLabels = apiData.labels.map(isoDateString => {
+                    const date = new Date(isoDateString);
+                    return date.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
+                });
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: turkishLabels,
+                        datasets: [{
+                            label: 'Aylık Tahsilat (₺)',
+                            data: apiData.data,
+                            backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1,
+                            borderRadius: 5
+                        }]
+                    },
+                    options: {
+                        maintainAspectRatio: false,
+                        responsive: true,
+                        scales: { y: { beginAtZero: true, ticks: { callback: function(value) { return new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(value); } } } },
+                        plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(context) { let label = context.dataset.label || ''; if (label) { label += ': '; } if (context.parsed.y !== null) { label += new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(context.parsed.y); } return label; } } } }
+                    }
+                });
+            })
+            .catch(error => console.error('Grafik verisi yüklenirken hata oluştu:', error));
+    });
+</script>
+{% endblock %}
