@@ -15,7 +15,7 @@
 # veri ekleme yapılan tüm sayfalrda silme ve düzenleme butonları eklensin
 #
 # git add .
-#  git commit -m "Yeni özellikler eklendi"
+#  git commit -m "Giderler sayfası ve ödeme planı düzenlemeleri"
 #  git push origin main
 #  git branch
 # --------------------
@@ -583,6 +583,13 @@ def assign_flat_owner():
 
 # app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla değiştirin.
 
+# app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla tamamen değiştirin.
+
+# app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla tamamen değiştirin.
+# app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla tamamen değiştirin.
+
+# app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla tamamen değiştirin.
+
 @app.route('/debts')
 def debt_status():
     if 'user_id' not in session:
@@ -593,7 +600,7 @@ def debt_status():
     projects_data = []
 
     try:
-        # 1. Sahibi olan TÜM daireleri, proje tipleriyle birlikte çek
+        # Adım 1: Sahibi olan TÜM daireleri, proje bilgileriyle birlikte çek.
         cur.execute("""
             SELECT 
                 f.id, p.name, p.project_type, f.block_name, f.floor, f.flat_no,
@@ -606,56 +613,71 @@ def debt_status():
         """)
         owned_flats = cur.fetchall()
 
-        # 2. Tüm taksitleri bir sözlüğe al (performans için)
-        cur.execute("SELECT flat_id, due_date, amount, is_paid, paid_amount FROM installment_schedule ORDER BY due_date ASC")
+        # Adım 2: TÜM taksitleri bir sözlüğe al (Normal projeler için).
+        cur.execute("SELECT flat_id, due_date, amount, is_paid, paid_amount FROM installment_schedule ORDER BY flat_id, due_date ASC")
         all_installments_raw = cur.fetchall()
         installments_by_flat = {flat_id: list(group) for flat_id, group in groupby(all_installments_raw, key=lambda x: x[0])}
 
-        # 3. Tüm ödemeleri bir sözlüğe al (performans için)
+        # Adım 3: TÜM ödemelerin toplamını daireye göre grupla.
         cur.execute("SELECT flat_id, COALESCE(SUM(amount), 0) as total_paid FROM payments GROUP BY flat_id")
         total_payments_by_flat = dict(cur.fetchall())
 
-        # 4. Verileri önce projeye, sonra daireye göre grupla
-        for project_name, project_group in groupby(owned_flats, key=lambda x: x[1]):
-            project_flats_list = []
-            project_type = "" # Proje tipini belirlemek için
-            
-            for flat_id, _, p_type, block_name, floor, flat_no, first_name, last_name, total_price in project_group:
-                project_type = p_type # Grubun ilk elemanından proje tipini al
-                
-                total_paid = total_payments_by_flat.get(flat_id, Decimal(0))
-                flat_dict = {
-                    'flat_id': flat_id,
-                    'customer_name': f"{first_name} {last_name}",
-                    'flat_details': f"Blok: {block_name or 'N/A'}, Kat: {floor}, No: {flat_no}",
-                    'total_paid': total_paid,
-                    'installments': []
-                }
+        # --- DÜZENLEME: Sorguya 'payment_method' eklendi ---
+        cur.execute("SELECT flat_id, payment_date, description, amount, payment_method FROM payments ORDER BY flat_id, payment_date DESC")
+        all_payments_raw = cur.fetchall()
+        payments_by_flat = {flat_id: list(group) for flat_id, group in groupby(all_payments_raw, key=lambda x: x[0])}
 
-                if project_type == 'normal':
-                    flat_dict['flat_total_price'] = total_price or 0
-                    flat_dict['remaining_debt'] = flat_dict['flat_total_price'] - total_paid
-                    
-                    current_installments = installments_by_flat.get(flat_id, [])
-                    today = date.today()
-                    for _, due_date, total_amount, is_paid, paid_amount in current_installments:
-                        status, css_class = ("Ödendi", "table-success") if is_paid else (f"Kısmen Ödendi", "table-warning") if paid_amount > 0 else ("Gecikmiş", "table-danger") if due_date < today else ("Bekleniyor", "table-light")
-                        flat_dict['installments'].append({
-                            'due_date': due_date, 'total_amount': total_amount, 'paid_amount': paid_amount or 0,
-                            'remaining_installment_due': total_amount - (paid_amount or 0),
-                            'status': status, 'css_class': css_class
-                        })
-                
-                project_flats_list.append(flat_dict)
-
-            projects_data.append({
+        # Adım 4: Tüm verileri Python'da birleştir.
+        flats_list = []
+        today = date.today()
+        for flat_id, project_name, project_type, block_name, floor, flat_no, first_name, last_name, total_price in owned_flats:
+            total_paid = total_payments_by_flat.get(flat_id, Decimal(0))
+            flat_dict = {
+                'flat_id': flat_id,
                 'project_name': project_name,
                 'project_type': project_type,
-                'flats': project_flats_list
+                'customer_name': f"{first_name} {last_name}",
+                'flat_details': f"Blok: {block_name or 'N/A'}, Kat: {floor}, No: {flat_no}",
+                'total_paid': total_paid,
+                'installments': [],
+                'payments': []
+            }
+            
+            if project_type == 'normal':
+                flat_dict['flat_total_price'] = total_price or 0
+                flat_dict['remaining_debt'] = flat_dict['flat_total_price'] - total_paid
+                
+                current_installments = installments_by_flat.get(flat_id, [])
+                for inst_id, due_date, total_amount, is_paid, paid_amount in current_installments:
+                    paid_amount = paid_amount or Decimal(0)
+                    status, css_class = ("Ödendi", "table-success") if is_paid else (f"Kısmen Ödendi", "table-warning") if paid_amount > 0 else ("Gecikmiş", "table-danger") if due_date < today else ("Bekleniyor", "table-light")
+                    
+                    flat_dict['installments'].append({
+                        'id': inst_id, # Taksit ID'sini de ekleyelim
+                        'due_date': due_date, 
+                        'total_amount': total_amount, 
+                        'remaining_installment_due': total_amount - paid_amount,
+                        'status': status, 
+                        'css_class': css_class
+                    })
+            
+            # --- DÜZENLEME: Ödeme detayları artık hem normal hem de kooperatif projeler için ekleniyor ---
+            flat_dict['payments'] = payments_by_flat.get(flat_id, [])
+            
+            flats_list.append(flat_dict)
+
+        # Son adım: Daireleri projelere göre grupla
+        for key, group in groupby(flats_list, key=lambda x: x['project_name']):
+            group_list = list(group)
+            projects_data.append({
+                'project_name': key,
+                'project_type': group_list[0]['project_type'],
+                'flats': group_list
             })
 
     except Exception as e:
         flash(f'Borç durumu sayfası yüklenirken bir hata oluştu: {e}', 'danger')
+        print(f"DEBTS PAGE ERROR: {e}")
         projects_data = []
     finally:
         cur.close()
@@ -664,6 +686,8 @@ def debt_status():
     return render_template('debts.html', 
                            projects_data=projects_data, 
                            user_name=session.get('user_name'))
+
+
 
 
 
@@ -1013,6 +1037,13 @@ def cooperative_report(project_id, year, month):
     cur = conn.cursor()
     report_data = {}
 
+    # --- EKLEME BAŞLANGICI: Türkçe ay isimleri için sözlük ---
+    turkish_months = {
+        1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs", 6: "Haziran",
+        7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık"
+    }
+    # --- EKLEME SONU ---
+
     try:
         start_date = date(year, month, 1)
         end_date = (start_date + relativedelta(months=1)) - relativedelta(days=1)
@@ -1033,8 +1064,14 @@ def cooperative_report(project_id, year, month):
             WHERE f.project_id = %s AND p.payment_date < %s
         """, (project_id, start_date))
         total_income_before = cur.fetchone()[0]
+        
+        # Önceki aydan devreden giderler her iki tablodan toplanıyor
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s AND expense_date < %s", (project_id, start_date))
-        total_expense_before = cur.fetchone()[0]
+        total_large_expense_before = cur.fetchone()[0]
+        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s AND expense_date < %s", (project_id, start_date))
+        total_petty_cash_before = cur.fetchone()[0]
+        total_expense_before = total_large_expense_before + total_petty_cash_before
+        
         previous_balance = total_income_before - total_expense_before
         report_data['previous_balance'] = previous_balance
 
@@ -1046,8 +1083,12 @@ def cooperative_report(project_id, year, month):
         current_income = cur.fetchone()[0]
         report_data['current_income'] = current_income
         
+        # Rapor ayına ait giderler her iki tablodan toplanıyor
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
-        current_expense = cur.fetchone()[0]
+        current_large_expense = cur.fetchone()[0]
+        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
+        current_petty_cash_expense = cur.fetchone()[0]
+        current_expense = current_large_expense + current_petty_cash_expense
         report_data['current_expense'] = current_expense
         
         # 3. Ay Sonu Bakiyesini Hesapla
@@ -1065,11 +1106,19 @@ def cooperative_report(project_id, year, month):
         income_details = cur.fetchall()
         report_data['income_details'] = income_details
 
-        cur.execute("SELECT expense_date, title, description, amount FROM expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s ORDER BY expense_date", (project_id, start_date, end_date))
-        expense_details = cur.fetchall()
+        # Gider detayları listesi her iki tablodan birleştirilip tarihe göre sıralanıyor
+        cur.execute("SELECT expense_date, title, description, amount FROM expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
+        large_expense_details = cur.fetchall()
+        cur.execute("SELECT expense_date, title, description, amount FROM petty_cash_expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
+        petty_cash_details = cur.fetchall()
+        
+        expense_details = large_expense_details + petty_cash_details
+        expense_details.sort(key=lambda x: x[0]) # Birleşik listeyi tarihe göre sırala
         report_data['expense_details'] = expense_details
         
-        report_data['report_period'] = start_date.strftime('%B %Y')
+        # --- DEĞİŞİKLİK: Rapor periyodu Türkçe ay ismini kullanarak oluşturuluyor ---
+        month_name = turkish_months.get(start_date.month, "")
+        report_data['report_period'] = f"{month_name} {start_date.year}"
 
     except Exception as e:
         flash(f"Rapor oluşturulurken bir hata oluştu: {e}", "danger")
@@ -1077,17 +1126,20 @@ def cooperative_report(project_id, year, month):
         cur.close()
         conn.close()
 
-    # === DEĞİŞİKLİK BURADA ===
     return render_template('coop_report.html', 
                            report_data=report_data,
                            user_name=session.get('user_name'))
-
 
 
 # app.py dosyanıza bu yeni route'u ekleyin
 
 # app.py dosyanızdaki mevcut list_expenses ve edit_expense fonksiyonlarını silip,
 # aşağıdaki İKİ YENİ fonksiyonu ekleyin.
+# app.py dosyanızdaki mevcut list_expenses fonksiyonunu bu kodla tamamen değiştirin.
+
+# app.py dosyanızdaki mevcut list_expenses fonksiyonunu bu kodla tamamen değiştirin.
+
+# app.py dosyanızdaki mevcut list_expenses fonksiyonunu bu kodla tamamen değiştirin.
 
 @app.route('/project/<int:project_id>/expenses')
 def list_expenses(project_id):
@@ -1097,6 +1149,7 @@ def list_expenses(project_id):
     conn = get_connection()
     cur = conn.cursor()
     expenses_data = []
+    petty_cash_items = []
     project_name = ""
     total_project_expense = Decimal(0)
 
@@ -1108,6 +1161,7 @@ def list_expenses(project_id):
             return redirect(url_for('dashboard'))
         project_name = project_name_result[0]
 
+        # 1. Planlı/Büyük Giderleri Çek
         cur.execute("""
             SELECT e.id, e.title, e.amount, e.description, s.name as supplier_name
             FROM expenses e
@@ -1117,7 +1171,7 @@ def list_expenses(project_id):
         """, (project_id,))
         expenses_raw = cur.fetchall()
 
-        # === DÜZELTME: Sorgu artık önce expense_id'ye göre sıralanıyor ===
+        # 2. Planlı Giderlerin Taksitlerini Çek
         cur.execute("""
             SELECT expense_id, due_date, sch.amount, is_paid, paid_amount, sch.id as installment_id
             FROM expense_schedule sch
@@ -1127,20 +1181,32 @@ def list_expenses(project_id):
         """, (project_id,))
         schedules_by_expense = {k: list(v) for k, v in groupby(cur.fetchall(), key=lambda x: x[0])}
 
-        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
-        total_project_expense = cur.fetchone()[0]
+        # 3. YENİ: Küçük Giderleri (Petty Cash) Çek
+        cur.execute("""
+            SELECT id, title, amount, expense_date, description
+            FROM petty_cash_expenses
+            WHERE project_id = %s
+            ORDER BY expense_date DESC, id DESC
+        """, (project_id,))
+        petty_cash_items = cur.fetchall()
 
+        # 4. Projenin Toplam Giderini Doğru Hesapla
+        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
+        total_planned_expense = cur.fetchone()[0]
+        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s", (project_id,))
+        total_petty_cash = cur.fetchone()[0]
+        total_project_expense = total_planned_expense + total_petty_cash
+
+        # 5. Planlı gider verilerini işle
         today = date.today()
         for expense_id, title, total_amount, description, supplier_name in expenses_raw:
             schedule = schedules_by_expense.get(expense_id, [])
             total_paid_for_this_expense = sum(item[4] for item in schedule if item[4] is not None)
-
             expense_dict = {
                 'expense_id': expense_id, 'title': title, 'supplier_name': supplier_name or "Tedarikçi Belirtilmemiş",
                 'total_amount': total_amount, 'total_paid': total_paid_for_this_expense,
                 'remaining_due': total_amount - total_paid_for_this_expense, 'installments': []
             }
-            
             for _, due_date, inst_amount, is_paid, paid_amount, inst_id in schedule:
                 paid_amount = paid_amount or Decimal(0)
                 status, css_class = ("Ödendi", "table-success") if is_paid else (f"Kısmen Ödendi", "table-warning") if paid_amount > 0 else ("Gecikmiş", "table-danger") if due_date < today else ("Bekleniyor", "table-light")
@@ -1149,11 +1215,11 @@ def list_expenses(project_id):
                     'remaining_installment_due': inst_amount - paid_amount,
                     'status': status, 'css_class': css_class, 'is_paid': is_paid
                 })
-            
             expenses_data.append(expense_dict)
             
     except Exception as e:
         flash(f"Giderler listelenirken bir hata oluştu: {e}", "danger")
+        print(f"EXPENSES PAGE ERROR: {e}")
     finally:
         cur.close()
         conn.close()
@@ -1162,8 +1228,44 @@ def list_expenses(project_id):
                            project_id=project_id,
                            project_name=project_name,
                            expenses_data=expenses_data,
+                           petty_cash_items=petty_cash_items,
                            total_project_expense=total_project_expense,
                            user_name=session.get('user_name'))
+
+
+
+@app.route('/project/<int:project_id>/petty_cash/add', methods=['POST'])
+def add_petty_cash(project_id):
+    """Bir projeye yeni bir küçük gider ekler."""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    try:
+        title = request.form.get('petty_cash_title')
+        amount = Decimal(request.form.get('petty_cash_amount'))
+        expense_date = request.form.get('petty_cash_date')
+        description = request.form.get('petty_cash_description')
+
+        if not all([title, amount, expense_date]):
+            raise ValueError("Başlık, Tutar ve Tarih alanları zorunludur.")
+        
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO petty_cash_expenses (project_id, title, amount, expense_date, description) VALUES (%s, %s, %s, %s, %s)",
+            (project_id, title, amount, expense_date, description)
+        )
+        conn.commit()
+        flash("Küçük gider başarıyla eklendi.", "success")
+
+    except Exception as e:
+        flash(f"Küçük gider eklenirken bir hata oluştu: {e}", "danger")
+    finally:
+        if 'conn' in locals() and conn:
+            cur.close()
+            conn.close()
+
+    return redirect(url_for('list_expenses', project_id=project_id))
 
 
 @app.route('/expense/<int:expense_id>/manage_plan', methods=['GET', 'POST'])
@@ -1629,7 +1731,7 @@ def list_payments():
     project = request.args.get('project')
     start = request.args.get('start_date')
     end = request.args.get('end_date')
-    customer_id = request.args.get('customer_id') # === YENİ: Müşteri ID'sini al ===
+    customer_id = request.args.get('customer_id')
     
     # Sıralama parametreleri
     sort_by = request.args.get('sort_by', 'tarih')
@@ -1642,10 +1744,10 @@ def list_payments():
     order_by_column = sortable_columns.get(sort_by, 'p.payment_date')
     if order not in ['asc', 'desc']: order = 'desc'
 
-    # Ana SQL sorgusu
+    # --- DÜZENLEME: SQL sorgusuna 'p.payment_method' eklendi ---
     sql = """
         SELECT p.id, pr.name, c.first_name, c.last_name, f.flat_no, f.floor,
-               p.installment, p.amount, p.payment_date, f.block_name
+               p.installment, p.amount, p.payment_date, f.block_name, p.payment_method
         FROM payments p
         JOIN flats f ON p.flat_id = f.id
         JOIN customers c ON f.owner_id = c.id
@@ -1663,7 +1765,6 @@ def list_payments():
     if end:
         filters.append("p.payment_date <= %s")
         params.append(end)
-    # === YENİ: Müşteri filtresini sorguya ekle ===
     if customer_id:
         filters.append("c.id = %s")
         params.append(customer_id)
@@ -1681,7 +1782,6 @@ def list_payments():
     cur.execute("SELECT name FROM projects ORDER BY name")
     all_projects = [r[0] for r in cur.fetchall()]
     
-    # === YENİ: Müşteri listesini dropdown için çek ===
     cur.execute("SELECT id, first_name, last_name FROM customers ORDER BY first_name, last_name")
     all_customers = cur.fetchall()
     
@@ -1691,9 +1791,9 @@ def list_payments():
     return render_template('payments.html',
                            payments=payments,
                            all_projects=all_projects,
-                           all_customers=all_customers, # === YENİ ===
+                           all_customers=all_customers,
                            selected_project=project,
-                           selected_customer_id=customer_id, # === YENİ ===
+                           selected_customer_id=customer_id,
                            start_date=start,
                            end_date=end,
                            sort_by=sort_by,
@@ -1728,23 +1828,37 @@ def reports():
             summary['total_flats'] = cur.fetchone()[0]
             cur.execute("SELECT COUNT(id) FROM flats WHERE project_id = %s AND owner_id IS NOT NULL", (project_id,))
             summary['assigned_flats'] = cur.fetchone()[0]
+
+            # --- DÜZELTME BAŞLANGICI: Gider sayısı ve toplamı doğru hesaplanıyor ---
+            # 1. Gider sayısını her iki tablodan toplayarak hesapla
             cur.execute("SELECT COUNT(id) FROM expenses WHERE project_id = %s", (project_id,))
-            summary['expense_count'] = cur.fetchone()[0]
-            
+            large_expense_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(id) FROM petty_cash_expenses WHERE project_id = %s", (project_id,))
+            petty_cash_count = cur.fetchone()[0]
+            summary['expense_count'] = large_expense_count + petty_cash_count
+
+            # 2. Gider toplamını her iki tablodan toplayarak hesapla
+            cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
+            total_large_expenses = cur.fetchone()[0]
+            cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s", (project_id,))
+            total_petty_cash = cur.fetchone()[0]
+            total_expenses = total_large_expenses + total_petty_cash
+            # --- DÜZELTME SONU ---
+
             if project_type == 'normal':
                 # --- MEVCUT FİNANSAL BİLGİLER ---
                 cur.execute("SELECT COALESCE(SUM(s.amount), 0) FROM installment_schedule s JOIN flats f ON s.flat_id = f.id WHERE f.project_id = %s", (project_id,))
                 planned_revenue = cur.fetchone()[0]
                 cur.execute("SELECT COALESCE(SUM(p.amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id WHERE f.project_id = %s", (project_id,))
                 collected_revenue = cur.fetchone()[0]
-                cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
-                total_expenses = cur.fetchone()[0]
+                # total_expenses zaten yukarıda doğru bir şekilde hesaplandı.
+
                 summary.update({
                     'planned_revenue': planned_revenue,
                     'collected_revenue': collected_revenue,
                     'outstanding_debt': planned_revenue - collected_revenue,
                     'progress_percentage': (collected_revenue / planned_revenue * 100) if planned_revenue > 0 else 0,
-                    'total_expenses': total_expenses,
+                    'total_expenses': total_expenses, # Düzeltilmiş toplam gider kullanılıyor
                     'net_cash_flow': collected_revenue - total_expenses
                 })
                 
@@ -1758,11 +1872,11 @@ def reports():
                 # --- MEVCUT FİNANSAL BİLGİLER ---
                 cur.execute("SELECT COALESCE(SUM(p.amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id WHERE f.project_id = %s", (project_id,))
                 member_contributions = cur.fetchone()[0]
-                cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
-                total_expenses = cur.fetchone()[0]
+                # total_expenses zaten yukarıda doğru bir şekilde hesaplandı.
+
                 summary.update({
                     'member_contributions': member_contributions,
-                    'total_expenses': total_expenses,
+                    'total_expenses': total_expenses, # Düzeltilmiş toplam gider kullanılıyor
                     'cash_balance': member_contributions - total_expenses
                 })
             
@@ -1812,19 +1926,23 @@ def dashboard():
         projects_raw = cur.fetchall()
         projects = [{'id': p[0], 'name': p[1], 'project_type': p[2]} for p in projects_raw]
 
-        # --- Müşteri Ödemeleri ---
-        cur.execute("""
-            SELECT c.first_name, c.last_name, s.due_date, s.amount - s.paid_amount as remaining_due
-            FROM installment_schedule s JOIN flats f ON s.flat_id = f.id JOIN customers c ON f.owner_id = c.id
-            WHERE s.is_paid = FALSE AND s.due_date < %s ORDER BY s.due_date ASC
-        """, (today,))
+        # --- Müşteri Ödemeleri (Proje ve Daire Detayları Eklendi) ---
+        customer_payments_sql = """
+            SELECT 
+                c.first_name, c.last_name, s.due_date, 
+                s.amount - s.paid_amount as remaining_due,
+                p.name as project_name, f.block_name, f.floor, f.flat_no
+            FROM installment_schedule s 
+            JOIN flats f ON s.flat_id = f.id 
+            JOIN customers c ON f.owner_id = c.id
+            JOIN projects p ON f.project_id = p.id
+            WHERE s.is_paid = FALSE AND s.due_date {condition}
+            ORDER BY s.due_date ASC
+        """
+        cur.execute(customer_payments_sql.format(condition="< %s"), (today,))
         overdue_customer_payments = cur.fetchall()
 
-        cur.execute("""
-            SELECT c.first_name, c.last_name, s.due_date, s.amount - s.paid_amount as remaining_due
-            FROM installment_schedule s JOIN flats f ON s.flat_id = f.id JOIN customers c ON f.owner_id = c.id
-            WHERE s.is_paid = FALSE AND s.due_date BETWEEN %s AND %s + INTERVAL '7 days' ORDER BY s.due_date ASC
-        """, (today, today))
+        cur.execute(customer_payments_sql.format(condition="BETWEEN %s AND %s + INTERVAL '7 days'"), (today, today))
         upcoming_customer_payments = cur.fetchall()
 
         # --- Gider Ödemeleri ---
@@ -1862,8 +1980,13 @@ def dashboard():
         # --- Bu Ayın Nakit Akışı ---
         cur.execute("SELECT COALESCE(SUM(amount - paid_amount), 0) FROM installment_schedule WHERE is_paid = FALSE AND DATE_TRUNC('month', due_date) = DATE_TRUNC('month', CURRENT_DATE)")
         monthly_income = cur.fetchone()[0]
+        
         cur.execute("SELECT COALESCE(SUM(amount - paid_amount), 0) FROM expense_schedule WHERE is_paid = FALSE AND DATE_TRUNC('month', due_date) = DATE_TRUNC('month', CURRENT_DATE)")
-        monthly_expense = cur.fetchone()[0]
+        monthly_scheduled_expense = cur.fetchone()[0]
+        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE DATE_TRUNC('month', expense_date) = DATE_TRUNC('month', CURRENT_DATE)")
+        monthly_petty_cash_expense = cur.fetchone()[0]
+        monthly_expense = monthly_scheduled_expense + monthly_petty_cash_expense
+
         monthly_cash_flow = {'income': monthly_income, 'expense': monthly_expense, 'net': monthly_income - monthly_expense}
 
     except Exception as e:

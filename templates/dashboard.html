@@ -4,13 +4,23 @@
 
 {% block extra_head %}
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    {# BİLGİ: Detayların daha güzel görünmesi için küçük bir stil eklendi #}
+    <style>
+        .payment-details {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+        .list-group-item strong {
+            display: block;
+        }
+    </style>
 {% endblock %}
 
 {% block content %}
 <div class="row g-4">
     <div class="col-lg-4">
         <div class="card mb-4">
-            <div class="card-header bg-dark text-white"><h5 class="mb-0"><i class="fa-solid fa-chart-line me-2"></i>Bu Ayın Nakit Akışı</h5></div>
+            <div class="card-header bg-dark text-white"><h5 class="mb-0"><i class="fa-solid fa-chart-line me-2"></i>Tüm Projeler - Bu Ayın Nakit Akışı</h5></div>
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-2"><span><i class="fa-solid fa-arrow-up text-success"></i> Beklenen Gelir</span><strong class="text-success fs-5">{{ "%.2f"|format(monthly_cash_flow.income) }} ₺</strong></div>
                 <div class="d-flex justify-content-between align-items-center mb-3"><span><i class="fa-solid fa-arrow-down text-danger"></i> Planlanan Gider</span><strong class="text-danger fs-5">{{ "%.2f"|format(monthly_cash_flow.expense) }} ₺</strong></div>
@@ -22,31 +32,81 @@
         <div class="card mb-4">
             <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="fa-solid fa-triangle-exclamation me-2"></i>Geciken Müşteri Ödemeleri ({{ overdue_customer_payments|length }})</h5></div>
             <ul class="list-group list-group-flush">
-                {% for fn, ln, due_date, remaining in overdue_customer_payments %}<li class="list-group-item d-flex justify-content-between align-items-center"><div><strong>{{ fn }} {{ ln }}</strong><br><small class="text-muted">{{ due_date.strftime('%d.%m.%Y') }}</small></div><span class="badge bg-danger rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span></li>{% else %}<li class="list-group-item text-center text-muted p-3">Gecikmiş müşteri ödemesi yok.</li>{% endfor %}
+                {# DÜZENLEME: Döngüye proje ve daire bilgileri eklendi #}
+                {% for fn, ln, due_date, remaining, p_name, b_name, floor, flat_no in overdue_customer_payments %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>{{ fn }} {{ ln }}</strong>
+                        {# DÜZENLEME: Proje ve daire detayları gösteriliyor #}
+                        <div class="payment-details">{{ p_name }} / Blok: {{ b_name or 'N/A' }}, Kat: {{ floor }}, No: {{ flat_no }}</div>
+                        <small class="text-muted">Vade: {{ due_date.strftime('%d.%m.%Y') }}</small>
+                    </div>
+                    <span class="badge bg-danger rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span>
+                </li>
+                {% else %}
+                <li class="list-group-item text-center text-muted p-3">Gecikmiş müşteri ödemesi yok.</li>
+                {% endfor %}
             </ul>
         </div>
 
         <div class="card mb-4">
             <div class="card-header bg-warning text-dark"><h5 class="mb-0"><i class="fa-solid fa-clock me-2"></i>Yaklaşan Müşteri Ödemeleri ({{ upcoming_customer_payments|length }})</h5></div>
             <ul class="list-group list-group-flush">
-                {% for fn, ln, due_date, remaining in upcoming_customer_payments %}<li class="list-group-item d-flex justify-content-between align-items-center"><div><strong>{{ fn }} {{ ln }}</strong><br><small class="text-muted">{{ due_date.strftime('%d.%m.%Y') }}</small></div><span class="badge bg-warning text-dark rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span></li>{% else %}<li class="list-group-item text-center text-muted p-3">Yaklaşan müşteri ödemesi yok.</li>{% endfor %}
+                {# DÜZENLEME: Döngüye proje ve daire bilgileri eklendi #}
+                {% for fn, ln, due_date, remaining, p_name, b_name, floor, flat_no in upcoming_customer_payments %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>{{ fn }} {{ ln }}</strong>
+                         {# DÜZENLEME: Proje ve daire detayları gösteriliyor #}
+                        <div class="payment-details">{{ p_name }} / Blok: {{ b_name or 'N/A' }}, Kat: {{ floor }}, No: {{ flat_no }}</div>
+                        <small class="text-muted">Vade: {{ due_date.strftime('%d.%m.%Y') }}</small>
+                    </div>
+                    <span class="badge bg-warning text-dark rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span>
+                </li>
+                {% else %}
+                <li class="list-group-item text-center text-muted p-3">Yaklaşan müşteri ödemesi yok.</li>
+                {% endfor %}
             </ul>
         </div>
-        
+        <hr class="my-4 ">
         <div class="card mb-4">
             <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="fa-solid fa-arrow-up-from-bracket me-2"></i>Geciken Gider Ödemeleri ({{ overdue_expense_payments|length }})</h5></div>
             <ul class="list-group list-group-flush">
-                {% for s_name, due_date, remaining, p_name in overdue_expense_payments %}<li class="list-group-item d-flex justify-content-between align-items-center"><div><strong>{{ s_name }}</strong><br><small class="text-muted">{{ p_name }}</small></div><span class="badge bg-danger rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span></li>{% else %}<li class="list-group-item text-center text-muted p-3">Gecikmiş gider ödemesi yok.</li>{% endfor %}
+                {% for s_name, due_date, remaining, p_name in overdue_expense_payments %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>{{ s_name }}</strong>
+                        {# DÜZENLEME: Proje detayı daha anlaşılır gösteriliyor #}
+                        <div class="payment-details">{{ p_name }} Projesi</div>
+                        <small class="text-muted">Vade: {{ due_date.strftime('%d.%m.%Y') }}</small>
+                    </div>
+                    <span class="badge bg-danger rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span>
+                </li>
+                {% else %}
+                <li class="list-group-item text-center text-muted p-3">Gecikmiş gider ödemesi yok.</li>
+                {% endfor %}
             </ul>
         </div>
 
         <div class="card mb-4">
             <div class="card-header bg-warning text-dark"><h5 class="mb-0"><i class="fa-solid fa-hourglass-start me-2"></i>Yaklaşan Gider Ödemeleri ({{ upcoming_expense_payments|length }})</h5></div>
             <ul class="list-group list-group-flush">
-                {% for s_name, due_date, remaining, p_name in upcoming_expense_payments %}<li class="list-group-item d-flex justify-content-between align-items-center"><div><strong>{{ s_name }}</strong><br><small class="text-muted">{{ p_name }}</small></div><span class="badge bg-warning text-dark rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span></li>{% else %}<li class="list-group-item text-center text-muted p-3">Yaklaşan gider ödemesi yok.</li>{% endfor %}
+                {% for s_name, due_date, remaining, p_name in upcoming_expense_payments %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>{{ s_name }}</strong>
+                        {# DÜZENLEME: Proje detayı daha anlaşılır gösteriliyor #}
+                        <div class="payment-details">{{ p_name }} Projesi</div>
+                        <small class="text-muted">Vade: {{ due_date.strftime('%d.%m.%Y') }}</small>
+                    </div>
+                    <span class="badge bg-warning text-dark rounded-pill fs-6">{{ "%.2f"|format(remaining) }} ₺</span>
+                </li>
+                {% else %}
+                <li class="list-group-item text-center text-muted p-3">Yaklaşan gider ödemesi yok.</li>
+                {% endfor %}
             </ul>
         </div>
-
+        <hr class="my-4">
         <div class="card">
              <div class="card-header"><h5 class="mb-0"><i class="fa-solid fa-money-check-dollar me-2"></i>Vadesi Yaklaşan Çekler (30 Gün)</h5></div>
              <div class="card-body">
@@ -60,7 +120,6 @@
                 </ul>
              </div>
         </div>
-
     </div>
 
     <div class="col-lg-8">
@@ -84,10 +143,11 @@
                             <small class="badge {% if project.project_type == 'normal' %} bg-primary {% else %} bg-success {% endif %}">{{ project.project_type }}</small>
                         </div>
                         <div class="btn-group" role="group">
-                            <a href="{{ url_for('list_expenses', project_id=project.id) }}" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-file-invoice-dollar me-1"></i> Giderler</a>
-                            <a href="{{ url_for('edit_project', project_id=project.id) }}" class="btn btn-outline-warning btn-sm"><i class="fa-solid fa-pencil me-1"></i> Düzenle</a>
+                             {# Projeler blueprint'ine taşındığı varsayılarak url_for güncellendi #}
+                            <a href="{{ url_for('list_expenses', project_id=project.id) }}" class="btn btn-primary btn-sm"><i class="fa-solid fa-file-invoice-dollar me-1"></i> Giderler</a>
+                            <a href="{{ url_for('edit_project', project_id=project.id) }}" class="btn btn-warning btn-sm"><i class="fa-solid fa-pencil me-1"></i> Düzenle</a>
                             <form action="{{ url_for('delete_project', project_id=project.id) }}" method="POST" class="d-inline">
-                                <button type="submit" class="btn btn-outline-danger btn-sm" onclick="return confirm('Bu projeyi ve tüm alt verilerini silmek istediğinizden emin misiniz?')"><i class="fa-solid fa-trash-alt me-1"></i> Sil</button>
+                                <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Bu projeyi ve tüm alt verilerini silmek istediğinizden emin misiniz?')"><i class="fa-solid fa-trash-alt me-1"></i> Sil</button>
                             </form>
                         </div>
                     </div>

@@ -9,7 +9,7 @@
         <p class="text-muted fs-5">{{ project_name }}</p>
     </div>
     <div>
-        <a href="{{ url_for('add_expense', project_id=project_id) }}" class="btn btn-primary"><i class="fa-solid fa-plus me-1"></i>Yeni Gider Tanımla</a>
+        <a href="{{ url_for('add_expense', project_id=project_id) }}" class="btn btn-primary"><i class="fa-solid fa-plus me-1"></i>Yeni Planlı Gider</a>
         <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Geri</a>
     </div>
 </div>
@@ -22,10 +22,45 @@
 
 <div class="card mb-4">
     <div class="card-body text-center p-3">
-        <h6 class="text-muted mb-1">PROJENİN TOPLAM TANIMLANAN GİDERİ</h6>
+        <h6 class="text-muted mb-1">PROJENİN TOPLAM GİDERİ</h6>
         <h4 class="fw-bold text-danger mb-0">{{ "%.2f"|format(total_project_expense) }} ₺</h4>
     </div>
 </div>
+
+<!-- === KÜÇÜK GİDERLER (PETTY CASH) BÖLÜMÜ === -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fa-solid fa-coins me-2 text-warning"></i>Proje Genel Giderleri (Fiş, Yemek vb.)</h5>
+        <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#addPettyCashModal">
+            <i class="fa-solid fa-plus me-1"></i>Yeni Küçük Gider Ekle
+        </button>
+    </div>
+    <div class="card-body table-responsive p-0">
+        <table class="table table-sm table-striped mb-0">
+            <thead><tr><th>Tarih</th><th>Açıklama</th><th class="text-end">Tutar</th></tr></thead>
+            <tbody>
+                {% for item in petty_cash_items %}
+                <tr>
+                    <td>{{ item[3].strftime('%d.%m.%Y') }}</td>
+                    <td>{{ item[1] }}</td>
+                    <td class="text-end fw-bold">{{ "%.2f"|format(item[2]) }} ₺</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="3" class="text-center text-muted p-3">Henüz küçük gider kaydı yok.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- === PLANLI BÜYÜK GİDERLER BÖLÜMÜ === -->
+<h4 class="mt-5 mb-3">Planlı Büyük Giderler (Tedarikçi Borçları)</h4>
+
+{% if not expenses_data %}
+    <div class="card text-center p-5">
+        <p class="h5 text-muted">Bu proje için tanımlanmış planlı gider bulunamadı.</p>
+    </div>
+{% endif %}
 
 {% for expense in expenses_data %}
 <div class="card mb-4">
@@ -53,11 +88,7 @@
             <table class="table table-bordered table-hover align-middle table-sm">
                 <thead class="table-secondary">
                     <tr>
-                        <th>Vade Tarihi</th>
-                        <th class="text-end">Taksit Tutarı</th>
-                        <th class="text-end">Kalan</th>
-                        <th class="text-center">Durum</th>
-                        <th class="text-center">Ödeme Yap</th>
+                        <th>Vade Tarihi</th><th class="text-end">Taksit Tutarı</th><th class="text-end">Kalan</th><th class="text-center">Durum</th><th class="text-center">Ödeme Yap</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -68,13 +99,7 @@
                         <td class="text-end fw-bold text-danger">{{ "%.2f"|format(installment.remaining_installment_due) }} ₺</td>
                         <td class="text-center"><span class="badge {% if installment.status == 'Ödendi' %} bg-success {% elif 'Kısmen' in installment.status %} bg-warning text-dark {% elif installment.status == 'Gecikmiş' %} bg-danger {% else %} bg-secondary {% endif %}">{{ installment.status }}</span></td>
                         <td class="text-center">
-                            {% if not installment.is_paid %}
-                            <a href="{{ url_for('pay_expense_installment', installment_id=installment.id) }}" class="btn btn-sm btn-success">
-                                <i class="fa-solid fa-cash-register me-1"></i> Öde
-                            </a>
-                            {% else %}
-                            <i class="fa-solid fa-check-circle text-success fs-5"></i>
-                            {% endif %}
+                            {% if not installment.is_paid %}<a href="{{ url_for('pay_expense_installment', installment_id=installment.id) }}" class="btn btn-sm btn-success"><i class="fa-solid fa-cash-register me-1"></i> Öde</a>{% else %}<i class="fa-solid fa-check-circle text-success fs-5"></i>{% endif %}
                         </td>
                     </tr>
                     {% else %}
@@ -86,4 +111,28 @@
     </div>
 </div>
 {% endfor %}
+
+<!-- Küçük Gider Ekleme Modalı (Pop-up) -->
+<div class="modal fade" id="addPettyCashModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Yeni Küçük Gider Ekle</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{{ url_for('add_petty_cash', project_id=project_id) }}" method="POST">
+                <div class="modal-body">
+                    <div class="mb-3"><label for="petty_cash_title" class="form-label">Başlık (*)</label><input type="text" name="petty_cash_title" class="form-control" required></div>
+                    <div class="mb-3"><label for="petty_cash_amount" class="form-label">Tutar (₺) (*)</label><input type="number" step="0.01" name="petty_cash_amount" class="form-control" required></div>
+                    <div class="mb-3"><label for="petty_cash_date" class="form-label">Tarih (*)</label><input type="date" name="petty_cash_date" class="form-control" required></div>
+                    <div class="mb-3"><label for="petty_cash_description" class="form-label">Açıklama</label><textarea name="petty_cash_description" class="form-control" rows="2"></textarea></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary">Kaydet</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 {% endblock %}
