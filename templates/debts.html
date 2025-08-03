@@ -49,21 +49,10 @@
                         <li><a class="dropdown-item" href="{{ url_for('list_payments') }}">Tüm Gelirler</a></li>
                         <li><a class="dropdown-item" href="{{ url_for('debt_status') }}">Borç Defteri</a></li>
                         <li><hr class="dropdown-divider"></li>
-                        <!-- <li><a class="dropdown-item" href="{{ url_for('select_project_for_expenses') }}">Proje Giderleri</a></li> -->
+                        <li><a class="dropdown-item" href="{{ url_for('select_project_for_expenses') }}">Proje Giderleri</a></li>
                         <li><a class="dropdown-item" href="{{ url_for('list_checks') }}">Çek Takibi</a></li>
                     </ul>
                 </li>
-                
-                <!--
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['list_customers'] %}active{% endif %}" href="#" id="adminDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="fa-solid fa-users-cog me-1"></i> Yönetim
-                    </a>
-                    <ul class="dropdown-menu" aria-labelledby="adminDropdown">
-                        <li><a class="dropdown-item" href="{{ url_for('list_customers') }}">Müşteriler</a></li>
-                    </ul>
-                </li>
-                -->
 
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle {% if request.endpoint in ['reports', 'select_project_for_coop_report'] %}active{% endif %}" href="#" id="reportsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fa-solid fa-chart-pie me-1"></i> Raporlar</a>
@@ -90,9 +79,16 @@
         <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Ana Sayfaya Dön</a>
     </div>
     
-    <div class="card mb-4">
+    <div class="card mb-4 ">
         <div class="card-body">
             <input type="text" id="customerSearchInput" class="form-control" placeholder="Müşteri adına göre ara...">
+        </div>
+        <div class="mx-3 my-1">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, msg in messages %}
+            <div class="alert alert-{{category}} small p-2 mb-2">{{msg}}</div>
+            {% endfor %}
+            {% endwith %}
         </div>
     </div>
 

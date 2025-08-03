@@ -6,6 +6,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
 </head>
 <body class="bg-light">
   
@@ -39,7 +40,7 @@
                 <div class="col-md-3"><label class="form-label fw-bold">Blok Adı</label></div>
                 <div class="col-md-2"><label class="form-label fw-bold">Daire No</label></div>
                 <div class="col-md-2"><label class="form-label fw-bold">Kat</label></div>
-                <div class="col-md-3"><label class="form-label fw-bold">Oda Tipi</label></div>
+                <div class="col-md-3"><label class="form-label fw-bold">Tipi</label></div>
                 <div class="col-md-2"></div>
             </div>
 
@@ -60,7 +61,7 @@
             <div class="col-md-3"><input type="text" data-name="block_name[]" class="form-control" placeholder="Örn: A Blok" required disabled></div>
             <div class="col-md-2"><input type="number" data-name="flat_no[]" class="form-control" required disabled></div>
             <div class="col-md-2"><input type="number" data-name="floor[]" class="form-control" required disabled></div>
-            <div class="col-md-3"><input type="text" data-name="room_type[]" class="form-control" placeholder="Örn: 2+1" required disabled></div>
+            <div class="col-md-3"><input type="text" data-name="room_type[]" class="form-control" placeholder="Örn: 2+1, Dükkan..." required disabled></div>
             <div class="col-md-2"><button type="button" class="btn btn-danger w-100 remove-flat"><i class="fa-solid fa-trash-alt"></i> Sil</button></div>
         </div>
 
@@ -68,7 +69,7 @@
 
         <div class="d-flex justify-content-between">
             <button type="button" id="add-flat" class="btn btn-success">
-                <i class="fa-solid fa-plus me-1"></i> Yeni Daire Satırı Ekle
+                <i class="fa-solid fa-plus me-1"></i> Yeni Satır Ekle
             </button>
             <button type="submit" class="btn btn-primary btn-lg">
                 <i class="fa-solid fa-save me-2"></i> Tüm Değişiklikleri Kaydet
