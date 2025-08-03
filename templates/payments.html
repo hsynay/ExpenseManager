@@ -13,7 +13,7 @@
 </style>
 {% endblock %}
 
-{% block content %}
+{% block content %} 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2 class="fw-bold"><i class="fa-solid fa-list me-2 text-primary"></i>Gelir Listesi</h2>
     <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Ana sayfaya dön</a>
@@ -75,6 +75,8 @@
                         </th>
                         <th><i class="fa-solid fa-door-open me-1"></i>Daire</th>
                         <th><i class="fa-solid fa-credit-card me-1"></i>Ödeme Yöntemi</th>
+                        <th><i class="fa-solid fa-credit-card me-1"></i>Açıklama</th>
+
                         <th class="text-end sortable">
                             <a href="{{ url_for('list_payments', sort_by='tutar', order='asc' if sort_by != 'tutar' or order == 'desc' else 'desc', project=selected_project, customer_id=selected_customer_id, start_date=start_date, end_date=end_date) }}">
                                 <i class="fa-solid fa-money-bill-wave me-1"></i>Ücret (₺) {% if sort_by == 'tutar' %}<i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }}"></i>{% endif %}
@@ -103,6 +105,7 @@
                                 <span class="badge bg-success"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
                             {% endif %}
                         </td>
+                        <td>{{ p[11] or 'N/A' }}</td>
                         <td class="text-end"><strong class="text-success">{{ "%.2f"|format(p[7]) }} ₺</strong></td>
                         <td class="text-end">
                             <i class="fa-solid fa-calendar-day me-1 text-muted"></i>

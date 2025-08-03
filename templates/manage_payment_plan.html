@@ -15,6 +15,13 @@
             <div class="card-header">
                 <h4 class="fw-bold mb-0"><i class="fa-solid fa-edit me-2"></i>Ödeme Planını Yönet</h4>
                 <small class="text-muted">Proje: {{ flat_info[0] }} | Daire: Blok {{ flat_info[1] }}, Kat {{ flat_info[2] }}, No {{ flat_info[3] }}</small>
+                <div class="mx-2 my-2">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% for category, msg in messages %}
+                    <div class="alert alert-{{category}} small p-2 mb-2">{{msg}}</div>
+                    {% endfor %}
+                    {% endwith %}
+                </div>
             </div>
             <div class="card-body p-4">
                 <form method="POST" action="{{ url_for('manage_payment_plan', flat_id=flat_id) }}">

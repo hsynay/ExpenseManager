@@ -15,7 +15,7 @@
 # veri ekleme yapılan tüm sayfalrda silme ve düzenleme butonları eklensin
 #
 # git add .
-#  git commit -m "Giderler sayfası ve ödeme planı düzenlemeleri"
+#  git commit -m "Yeni özellikler eklendi."
 #  git push origin main
 #  git branch
 # --------------------
@@ -51,7 +51,6 @@ def get_user_by_email(email):
 # --------------------
 # ROUTELAR
 # --------------------
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -104,8 +103,6 @@ def new_project():
 
 # app.py'deki add_flats fonksiyonunu bununla değiştirin
 
-# app.py dosyanızdaki mevcut add_flats fonksiyonunu bu kodla değiştirin.
-
 @app.route('/project/<int:project_id>/flats', methods=['GET', 'POST'])
 def add_flats(project_id):
     """
@@ -140,7 +137,7 @@ def add_flats(project_id):
             
             conn.commit()
             flash('Daire listesi başarıyla güncellendi.', 'success')
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('assign_flat_owner'))
 
         except Exception as e:
             conn.rollback()
@@ -179,12 +176,6 @@ def add_flats(project_id):
 
 # app.py dosyanıza ekleyin
 
-# app.py dosyanızdaki @app.route('/assign_flat_owner', methods=['GET', 'POST']) fonksiyonunu tamamen bu kodla değiştirin
-
-# app.py dosyanızdaki @app.route('/assign_flat_owner', methods=['GET', 'POST']) fonksiyonunu tamamen bu kodla değiştirin
-
-# app.py dosyanıza bu yeni route'u ekleyin.
-
 @app.route('/expenses/select_project', methods=['GET', 'POST'])
 def select_project_for_expenses():
     if 'user_id' not in session:
@@ -208,15 +199,9 @@ def select_project_for_expenses():
                            projects=projects, 
                            user_name=session.get('user_name'))
 
-# app.py dosyanıza bu yeni route'u ekleyin.
-
-# app.py'de new_supplier_payment fonksiyonunu SİLİN.
-# Mevcut add_expense fonksiyonunu SİLİP yerine AŞAĞIDAKİ İKİ FONKSİYONU EKLEYİN.
-
-# app.py dosyanızdaki add_expense fonksiyonunun bu olduğundan emin olun.
-
 
 # app.py'deki mevcut new_supplier_payment fonksiyonunu bu kodla değiştirin.
+
 @app.route('/supplier_payment/new', methods=['GET', 'POST'])
 def new_supplier_payment():
     if 'user_id' not in session:
@@ -383,12 +368,6 @@ def add_expense(project_id):
                            suppliers=suppliers,
                            user_name=session.get('user_name'))
 
-
-# app.py dosyanızdaki pay_expense_installment fonksiyonunu bununla değiştirin.
-
-# app.py dosyanızdaki pay_expense_installment fonksiyonunu bununla değiştirin.
-
-# app.py dosyanızdaki pay_expense_installment fonksiyonunu bununla değiştirin.
 
 # app.py dosyanızdaki pay_expense_installment fonksiyonunu bununla değiştirin.
 
@@ -576,18 +555,6 @@ def assign_flat_owner():
                            customers=customers,
                            user_name=session.get('user_name'))
 
-
-#app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla değiştirin.
-
-# app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla değiştirin.
-
-# app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla değiştirin.
-
-# app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla tamamen değiştirin.
-
-# app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla tamamen değiştirin.
-# app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla tamamen değiştirin.
-
 # app.py dosyanızdaki mevcut debt_status fonksiyonunu bu kodla tamamen değiştirin.
 
 @app.route('/debts')
@@ -687,11 +654,6 @@ def debt_status():
                            projects_data=projects_data, 
                            user_name=session.get('user_name'))
 
-
-
-
-
-# app.py dosyanıza bu iki yeni route'u ekleyin
 
 # app.py dosyanıza bu iki yeni route'u ekleyin
 
@@ -839,11 +801,6 @@ def list_customers():
     return render_template('customers.html', 
                            customers=customers, 
                            user_name=session.get('user_name')) 
-# app.py dosyanıza bu iki yeni route'u ekleyin
-
-# app.py dosyanızdaki mevcut list_expenses fonksiyonunu bu kodla tamamen değiştirin.
-
-# app.py dosyanızdaki mevcut list_expenses fonksiyonunu bu kodla tamamen değiştirin.
 
 
 # app.py dosyanızdaki list_checks fonksiyonunu bununla değiştirin
@@ -1130,14 +1087,6 @@ def cooperative_report(project_id, year, month):
                            report_data=report_data,
                            user_name=session.get('user_name'))
 
-
-# app.py dosyanıza bu yeni route'u ekleyin
-
-# app.py dosyanızdaki mevcut list_expenses ve edit_expense fonksiyonlarını silip,
-# aşağıdaki İKİ YENİ fonksiyonu ekleyin.
-# app.py dosyanızdaki mevcut list_expenses fonksiyonunu bu kodla tamamen değiştirin.
-
-# app.py dosyanızdaki mevcut list_expenses fonksiyonunu bu kodla tamamen değiştirin.
 
 # app.py dosyanızdaki mevcut list_expenses fonksiyonunu bu kodla tamamen değiştirin.
 
@@ -1551,88 +1500,6 @@ def manage_payment_plan(flat_id):
                            user_name=session.get('user_name'))
 
 
-# app.py'deki debt_status fonksiyonunu bununla değiştirin
-
-# app.py'deki debt_status fonksiyonunu bununla değiştirin
-
-# @app.route('/debts')
-# def debt_status():
-#     if 'user_id' not in session:
-#         return redirect(url_for('login'))
-
-#     conn = get_connection()
-#     cur = conn.cursor()
-
-#     # Sorguya s.paid_amount sütununu ekledik
-#     cur.execute("""
-#         SELECT 
-#             p.name AS project_name, c.first_name, c.last_name, f.id as flat_id, f.flat_no, f.floor,
-#             f.total_price AS flat_total_price, s.id AS schedule_id, s.due_date, s.amount, s.is_paid, f.block_name,
-#             s.paid_amount
-#         FROM installment_schedule s
-#         JOIN flats f ON s.flat_id = f.id
-#         JOIN projects p ON f.project_id = p.id
-#         JOIN customers c ON f.owner_id = c.id
-#         WHERE f.project_id IN (SELECT id FROM projects WHERE project_type = 'normal')
-#         ORDER BY p.name, f.block_name, f.floor, f.flat_no, s.due_date
-#     """)
-#     installments_raw = cur.fetchall()
-
-#     cur.execute("SELECT flat_id, COALESCE(SUM(amount), 0) as total_paid FROM payments GROUP BY flat_id")
-#     total_payments_by_flat = dict(cur.fetchall())
-    
-#     cur.close()
-#     conn.close()
-
-#     flats_data = []
-#     for key, group in groupby(installments_raw, key=lambda x: x[3]): # flat_id'ye göre grupla
-#         group_list = list(group)
-#         first_item = group_list[0]
-        
-#         flat_info = {
-#             'flat_id': key,
-#             'project_name': first_item[0],
-#             'customer_name': f"{first_item[1]} {first_item[2]}",
-#             'flat_details': f"Blok: {first_item[11] or 'N/A'}, Kat: {first_item[5]}, No: {first_item[4]}",
-#             'flat_total_price': first_item[6] or 0,
-#             'total_paid': total_payments_by_flat.get(key, 0),
-#             'installments': []
-#         }
-#         flat_info['remaining_debt'] = flat_info['flat_total_price'] - flat_info['total_paid']
-
-#         today = date.today()
-#         for item in group_list:
-#             due_date, is_paid, total_amount, paid_amount = item[8], item[10], item[9], item[12]
-#             status = ""
-#             css_class = ""
-
-#             if is_paid:
-#                 status = "Ödendi"
-#                 css_class = "table-success"
-#             elif paid_amount > 0:
-#                 status = f"Kısmen Ödendi ({paid_amount} ₺)"
-#                 css_class = "table-warning"
-#             elif due_date < today:
-#                 status = "Gecikmiş"
-#                 css_class = "table-danger"
-#             else:
-#                 status = "Bekleniyor"
-#                 css_class = "table-light"
-            
-#             flat_info['installments'].append({
-#                 'due_date': due_date,
-#                 'total_amount': total_amount,
-#                 'paid_amount': paid_amount,
-#                 'remaining_installment_due': total_amount - paid_amount,
-#                 'status': status,
-#                 'css_class': css_class
-#             })
-        
-#         flats_data.append(flat_info)
-
-#     return render_template('debts.html', flats_data=flats_data, user_name=session.get('user_name'))
-
-
 # app.py dosyanıza bu yeni route'u ekleyin
 
 # app.py dosyanızdaki print_debt_statement fonksiyonunu bununla değiştirin.
@@ -1747,7 +1614,7 @@ def list_payments():
     # --- DÜZENLEME: SQL sorgusuna 'p.payment_method' eklendi ---
     sql = """
         SELECT p.id, pr.name, c.first_name, c.last_name, f.flat_no, f.floor,
-               p.installment, p.amount, p.payment_date, f.block_name, p.payment_method
+               p.installment, p.amount, p.payment_date, f.block_name, p.payment_method, p.description
         FROM payments p
         JOIN flats f ON p.flat_id = f.id
         JOIN customers c ON f.owner_id = c.id
