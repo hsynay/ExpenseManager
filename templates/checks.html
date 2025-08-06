@@ -35,7 +35,6 @@
                             <td class="text-end fw-bold">{{ "%.2f"|format(check[2]) }} ₺</td>
                             <td class="text-center"><span class="badge bg-info">{{ check[6]|capitalize }}</span></td>
                             <td class="text-center">
-                                <!-- === GÜNCELLEME: Dropdown yerine direkt butonlar === -->
                                 {% if check[6] == 'portfoyde' %}
                                 <div class="btn-group btn-group-sm">
                                     <form action="{{ url_for('update_check_status') }}" method="POST" class="d-inline">
