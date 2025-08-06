@@ -5,6 +5,9 @@ A modern and user-friendly web-based application to manage construction projects
 <div align="center">
 
 ![Dashboard Preview](SS_dashboard.png)
+![Detail of Debts Preview](SS_debts.png)
+![Detail of Reports Preview](SS_reports.png)
+
 
 [![Live Demo](https://img.shields.io/badge/🌐_Live_Demo-Render-blue?style=for-the-badge)](https://construction-project-i03m.onrender.com)
 [![Made with Flask](https://img.shields.io/badge/Made_with-Flask-green?style=for-the-badge&logo=flask)](https://flask.palletsprojects.com/)
