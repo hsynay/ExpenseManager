@@ -5,9 +5,13 @@ A modern and user-friendly web-based application to manage construction projects
 <div align="center">
 
 ![Dashboard Preview](SS_dashboard.png)
-<br>
+
+---
+
 ![Detail of Debts Preview](SS_debts.png)
-<br>
+
+---
+
 ![Detail of Reports Preview](SS_reports.png)
 
 
