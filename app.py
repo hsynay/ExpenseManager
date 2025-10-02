@@ -9,7 +9,7 @@ from datetime import datetime
 from itertools import groupby
 from datetime import date
 from decimal import Decimal 
-
+from flask import jsonify
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  
@@ -24,6 +24,9 @@ def get_user_by_email(email):
     conn.close()
     return user 
 
+@app.route("/ping")
+def ping():
+    return jsonify({"status": "ok"}), 200
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -502,7 +505,7 @@ def assign_flat_owner():
             FROM flats f
             JOIN projects pr ON f.project_id = pr.id
             LEFT JOIN customers c ON f.owner_id = c.id
-            ORDER BY pr.name, f.block_name, f.floor, f.flat_no
+            ORDER BY pr.name, f.block_name, f.flat_no
         """)
         flats_data = cur.fetchall()
         cur.execute("SELECT id, first_name, last_name FROM customers ORDER BY first_name, last_name")
