@@ -115,15 +115,15 @@
                         </div>
                         <div class="card-body p-3">
                             <div class="row text-center mb-3 g-2">
-                                <div class="col-md-4"><div class="p-2 border rounded-3"><h6 class="text-muted small mb-1">Toplam Borç</h6><p class="h6 fw-bold mb-0 text-primary">{{ "%.2f"|format(flat.flat_total_price) }} ₺</p></div></div>
-                                <div class="col-md-4"><div class="p-2 border rounded-3"><h6 class="text-muted small mb-1">Toplam Ödenen</h6><p class="h6 fw-bold mb-0 text-success">{{ "%.2f"|format(flat.total_paid) }} ₺</p></div></div>
-                                <div class="col-md-4"><div class="p-2 border rounded-3"><h6 class="text-muted small mb-1">Kalan Borç</h6><p class="h6 fw-bold mb-0 text-danger">{{ "%.2f"|format(flat.remaining_debt) }} ₺</p></div></div>
+                                <div class="col-md-4"><div class="p-2 border rounded-3"><h6 class="text-muted small mb-1">Toplam Borç</h6><p class="h6 fw-bold mb-0 text-primary">{{ flat.flat_total_price|thousands }} ₺</p></div></div>
+                                <div class="col-md-4"><div class="p-2 border rounded-3"><h6 class="text-muted small mb-1">Toplam Ödenen</h6><p class="h6 fw-bold mb-0 text-success">{{ flat.total_paid|thousands }} ₺</p></div></div>
+                                <div class="col-md-4"><div class="p-2 border rounded-3"><h6 class="text-muted small mb-1">Kalan Borç</h6><p class="h6 fw-bold mb-0 text-danger">{{ flat.remaining_debt|thousands }} ₺</p></div></div>
                             </div>
                             <div class="table-responsive">
                                 <table class="table table-bordered table-sm">
                                     <tbody>
                                         {% for inst in flat.installments %}
-                                        <tr class="{{ inst.css_class }}"><td>{{ inst.due_date.strftime('%d.%m.%Y') }}</td><td class="text-end">{{ "%.2f"|format(inst.total_amount) }} ₺</td><td class="text-end fw-bold">{{ "%.2f"|format(inst.remaining_installment_due) }} ₺</td><td class="text-center"><span class="badge small {% if inst.status == 'Ödendi' %} bg-success {% elif 'Kısmen' in inst.status %} bg-warning text-dark {% elif inst.status == 'Gecikmiş' %} bg-danger {% else %} bg-secondary {% endif %}">{{ inst.status }}</span></td></tr>
+                                        <tr class="{{ inst.css_class }}"><td>{{ inst.due_date.strftime('%d.%m.%Y') }}</td><td class="text-end">{{ inst.total_amount|thousands }} ₺</td><td class="text-end fw-bold">{{ inst.remaining_installment_due|thousands }} ₺</td><td class="text-center"><span class="badge small {% if inst.status == 'Ödendi' %} bg-success {% elif 'Kısmen' in inst.status %} bg-warning text-dark {% elif inst.status == 'Gecikmiş' %} bg-danger {% else %} bg-secondary {% endif %}">{{ inst.status }}</span></td></tr>
                                         {% else %}
                                         <tr><td colspan="4" class="text-center text-muted p-2 small">Ödeme planı oluşturulmamış.</td></tr>
                                         {% endfor %}
@@ -161,7 +161,7 @@
                                                         <span class="badge bg-success"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
                                                     {% endif %}
                                                 </td>
-                                                <td class="text-end fw-bold">{{ "%.2f"|format(p_amount) }} ₺</td>
+                                                <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
                                             </tr>
                                             {% endfor %}
                                         </tbody>
@@ -181,7 +181,7 @@
                                 </div>
                                 <div>
                                     <span class="me-2">Toplam Katkı Payı:</span>
-                                    <span class="badge bg-success fs-6 me-2">{{ "%.2f"|format(flat.total_paid) }} ₺</span>
+                                    <span class="badge bg-success fs-6 me-2">{{ flat.total_paid|thousands }} ₺</span>
                                     <button class="btn btn-outline-dark btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#coopDetails-{{ flat.flat_id }}">
                                         Detay <i class="fa-solid fa-chevron-down small"></i>
                                     </button>
@@ -213,7 +213,7 @@
                                                         <span class="badge bg-success"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
                                                     {% endif %}
                                                 </td>
-                                                <td class="text-end fw-bold">{{ "%.2f"|format(p_amount) }} ₺</td>
+                                                <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
                                             </tr>
                                             {% endfor %}
                                         </tbody>

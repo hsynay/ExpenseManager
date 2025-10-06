@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}{{ project_name }} - Gelir/Gider Listesi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold mb-0"><i class="fa-solid fa-chart-column me-2 text-primary"></i>Gelir & Gider Listesi</h2>
+        <p class="text-muted fs-5">{{ project_name }}</p>
+    </div>
+    <div>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-arrow-left me-1"></i>Geri
+        </a>
+    </div>
+</div>
+
+<form method="get" class="mb-4">
+    <div class="row g-2 align-items-center">
+        <div class="col-md-3">
+            <label class="form-label fw-bold mb-1">Görüntüle:</label>
+            <select name="view" class="form-select" onchange="this.form.submit()">
+                <option value="all" {% if view_type == 'all' %}selected{% endif %}>Tümü (Gelir + Gider)</option>
+                <option value="income" {% if view_type == 'income' %}selected{% endif %}>Sadece Gelirler</option>
+                <option value="expense" {% if view_type == 'expense' %}selected{% endif %}>Sadece Giderler</option>
+            </select>
+        </div>
+
+        {% if view_type in ['all', 'expense'] %}
+        <div class="col-md-3">
+            <label class="form-label fw-bold mb-1">Gider Türü:</label>
+            <select name="expense_type" class="form-select" onchange="this.form.submit()">
+                <option value="all" {% if expense_type == 'all' %}selected{% endif %}>Tüm Giderler</option>
+                <option value="big" {% if expense_type == 'big' %}selected{% endif %}>Sadece Büyük Giderler</option>
+                <option value="small" {% if expense_type == 'small' %}selected{% endif %}>Sadece Küçük Giderler</option>
+            </select>
+        </div>
+        {% endif %}
+    </div>
+</form>
+
+{% if view_type in ['all', 'income'] %}
+<div class="card mb-4">
+    <div class="card-header bg-success text-white">
+        <h5 class="mb-0"><i class="fa-solid fa-arrow-down me-2"></i>Gelirler</h5>
+    </div>
+    <div class="card-body table-responsive">
+        <table class="table table-striped table-sm mb-0">
+            <thead><tr><th>Tarih</th><th>Açıklama</th><th>Yöntem</th><th class="text-end">Tutar</th></tr></thead>
+            <tbody>
+                {% for date, desc, amount, method in income_data %}
+                <tr>
+                    <td>{{ date.strftime('%d.%m.%Y') }}</td>
+                    <td>{{ desc }}</td>
+                    <td>{{ method }}</td>
+                    <td class="text-end text-success fw-bold">{{ amount|thousands }} ₺</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="text-center text-muted p-3">Gelir kaydı yok.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if view_type in ['all', 'expense'] %}
+<div class="card">
+    <div class="card-header bg-danger text-white">
+        <h5 class="mb-0"><i class="fa-solid fa-arrow-up me-2"></i>Giderler</h5>
+    </div>
+    <div class="card-body table-responsive">
+        <table class="table table-striped table-sm mb-0">
+            <thead><tr><th>Tarih</th><th>Başlık</th><th>Tür</th><th>Yöntem</th><th class="text-end">Tutar</th></tr></thead>
+            <tbody>
+                {% for date, title, amount, method, type in expense_data %}
+                <tr>
+                    <td>{{ date.strftime('%d.%m.%Y') }}</td>
+                    <td>{{ title }}</td>
+                    <td><span class="badge {% if type == 'Büyük Gider' %}bg-primary{% else %}bg-warning text-dark{% endif %}">{{ type }}</span></td>
+                    <td>{{ method }}</td>
+                    <td class="text-end text-danger fw-bold">{{ amount|thousands }} ₺</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center text-muted p-3">Gider kaydı yok.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

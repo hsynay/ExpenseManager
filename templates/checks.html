@@ -32,7 +32,7 @@
                             <td>{{ check[1].strftime('%d.%m.%Y') }}</td>
                             <td>{{ check[3] }}</td>
                             <td>{{ check[4] or '-' }} / {{ check[5] or '-' }}</td>
-                            <td class="text-end fw-bold">{{ "%.2f"|format(check[2]) }} ₺</td>
+                            <td class="text-end fw-bold">{{ check[2]|thousands }} ₺</td>
                             <td class="text-center"><span class="badge bg-info">{{ check[6]|capitalize }}</span></td>
                             <td class="text-center">
                                 {% if check[6] == 'portfoyde' %}
@@ -85,7 +85,7 @@
                             <td>{{ check[1].strftime('%d.%m.%Y') }}</td>
                             <td>{{ check[3] }}</td>
                             <td>{{ check[4] or '-' }} / {{ check[5] or '-' }}</td>
-                            <td class="text-end fw-bold">{{ "%.2f"|format(check[2]) }} ₺</td>
+                            <td class="text-end fw-bold">{{ check[2]|thousands }} ₺</td>
                             <td class="text-center"><span class="badge bg-secondary">{{ check[6]|capitalize }}</span></td>
                             <td class="text-center">
                                 {% if check[6] == 'verildi' %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Geliri Düzenle{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-body p-4">
+                <h3 class="mb-4">Geliri Düzenle</h3>
+                <form method="POST">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Müşteri</label>
+                            <input type="text" class="form-control" value="{{ payment.customer_name }}" disabled>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Daire</label>
+                            <input type="text" class="form-control" value="{{ payment.flat_desc }}" disabled>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Tutar (₺)</label>
+                            <input type="text" step="0.01" name="amount" class="form-control thousands-input" value="{{ payment.amount }}" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Tarih</label>
+                            <input type="date" name="payment_date" class="form-control" value="{{ payment.payment_date }}" required>
+                        </div>
+                    </div>
+                    {% if payment.payment_method == 'çek' or payment.check_id %}
+                    <div class="border rounded-3 p-3 mb-3 bg-light">
+                        <h6 class="mb-3">Çek Bilgileri</h6>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Vade Tarihi</label>
+                                <input type="date" name="check_due_date" class="form-control" value="{{ payment.check_due_date or '' }}">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Banka Adı</label>
+                                <input type="text" name="check_bank_name" class="form-control" value="{{ payment.check_bank_name or '' }}">
+                            </div>
+                            <div class="col-md-12 mb-3">
+                                <label class="form-label">Çek Numarası</label>
+                                <input type="text" name="check_number" class="form-control" value="{{ payment.check_number or '' }}">
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                    <div class="mb-3">
+                        <label class="form-label">Açıklama</label>
+                        <textarea name="description" class="form-control" rows="3">{{ payment.description }}</textarea>
+                    </div>
+                    <div class="d-flex justify-content-end">
+                        <a href="{{ url_for('list_payments') }}" class="btn btn-secondary me-2">İptal</a>
+                        <button type="submit" class="btn btn-primary">Güncelle</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
