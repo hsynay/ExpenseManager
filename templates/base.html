@@ -22,27 +22,27 @@
                 <li class="nav-item">
                     <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><i class="fa-solid fa-home me-1"></i>Ana Sayfa</a>
                 </li>
-
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_project', 'assign_flat_owner'] %}active{% endif %}" href="#" id="projectDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="fa-solid fa-folder-tree me-1"></i> Projeler
-                    </a>
-                    <ul class="dropdown-menu" aria-labelledby="projectDropdown">
-                        <li><a class="dropdown-item" href="{{ url_for('new_project') }}">Yeni Proje Ekle</a></li>
-                        <li><a class="dropdown-item" href="{{ url_for('assign_flat_owner') }}">Daire Sahibi Ata</a></li>
-                    </ul>
-                </li>
-
+                <li class="nav-item mx-3"></li>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_payment', 'list_payments', 'debt_status', 'select_project_for_expenses'] %}active{% endif %}" href="#" id="financialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fa-solid fa-coins me-1"></i> Finansal
                     </a>
                     <ul class="dropdown-menu" aria-labelledby="financialDropdown">
+                        <li><a class="dropdown-item" href="{{ url_for('assign_flat_owner') }}">Daire Sahibi Ata</a></li>
                         <li><a class="dropdown-item" href="{{ url_for('new_payment') }}">Yeni Gelir Kaydet</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('debt_status') }}">Ödeme Planı ve Durumu</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('select_project_for_expenses') }}">Giderleri Düzenle</a></li>
+                    </ul>
+                </li>
+
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_payment', 'list_payments', 'debt_status', 'select_project_for_expenses'] %}active{% endif %}" href="#" id="financialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fa-solid fa-list me-1"></i> Görüntüle
+                    </a>
+                    <ul class="dropdown-menu" aria-labelledby="financialDropdown">
                         <li><a class="dropdown-item" href="{{ url_for('list_payments') }}">Tüm Gelirler</a></li>
-                        <li><a class="dropdown-item" href="{{ url_for('debt_status') }}">Borç Defteri</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('all_expenses') }}">Tüm Giderler</a></li>
                         <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item" href="{{ url_for('select_project_for_expenses') }}">Proje Giderleri</a></li>
                         <li><a class="dropdown-item" href="{{ url_for('list_checks') }}">Çek Takibi</a></li>
                     </ul>
                 </li>
@@ -86,5 +86,72 @@
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     {% block scripts %}{% endblock %}
+
+    <script>
+    // thousands-input: gösterimde nokta ile binlik ayır, ondalıkta virgül
+    (function(){
+        function parseNumberString(s){
+            if(s === null || s === undefined) return NaN;
+            s = String(s).trim();
+            if(s === '') return NaN;
+            // If both separators present assume dot = thousands, comma = decimal
+            if(s.indexOf('.') > -1 && s.indexOf(',') > -1){
+                s = s.replace(/\./g,'').replace(/,/g,'.');
+                return Number(s);
+            }
+            // Remove dots that look like thousands separators: dot followed by groups of 3 digits
+            s = s.replace(/\.(?=\d{3}(?:\.|,|$))/g, '');
+            // replace comma with dot to normalize decimal separator
+            s = s.replace(/,/g, '.');
+            return Number(s);
+        }
+
+        function toDisplay(value){
+            if(value === null || value === undefined || value === '') return '';
+            var num = parseNumberString(value);
+            if(isNaN(num)) return value;
+            var parts = num.toFixed(2).split('.');
+            parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            // if fractional is .00, show only integer part
+            if(parts[1] === '00') return parts[0];
+            // remove trailing zeros in fractional
+            var frac = parts[1].replace(/0+$/,'');
+            return parts[0] + ',' + frac;
+        }
+
+        function toSubmitValue(display){
+            if(display === null || display === undefined || display === '') return '';
+            var n = parseNumberString(display);
+            if(isNaN(n)) return '';
+            // Use dot as decimal separator for server
+            return n.toString();
+        }
+
+        function initInput(el){
+            // initial display formatting
+            if(el.value) el.value = toDisplay(el.value);
+            el.addEventListener('input', function(e){
+                // allow typing numbers, dots and commas; don't reformat while typing caret position may jump
+                // simple approach: format on blur
+            });
+            el.addEventListener('blur', function(e){
+                el.value = toDisplay(el.value);
+            });
+            el.form && el.form.addEventListener('submit', function(){
+                // replace with server-friendly numeric string (dot decimal)
+                var hidden = document.createElement('input');
+                hidden.type = 'hidden';
+                hidden.name = el.name;
+                hidden.value = toSubmitValue(el.value);
+                el.disabled = true; // prevent double submission of the visible field
+                el.form.appendChild(hidden);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function(){
+            document.querySelectorAll('.thousands-input').forEach(function(el){ initInput(el); });
+        });
+    })();
+    </script>
 </body>
 </html>

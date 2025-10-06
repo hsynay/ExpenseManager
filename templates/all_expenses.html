@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Gider Listesi - KONAK İnşaat{% endblock %}
+
+{% block extra_head %}
+<style>
+    body { padding-top: 76px; }
+    .table-danger { --bs-table-bg: #ffe6e6; }
+    .table-warning { --bs-table-bg: #fff4cc; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold"><i class="fa-solid fa-receipt me-2 text-danger"></i>Tüm Giderler</h2>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Ana sayfaya dön</a>
+</div>
+
+<div class="filter-card mb-4">
+    <h5 class="fw-bold mb-3"><i class="fa-solid fa-filter me-2"></i>Filtreleme Seçenekleri</h5>
+    <form class="row g-3" method="get">
+        <div class="col-md-3">
+            <label class="form-label fw-semibold">Proje</label>
+            <select name="project" class="form-select">
+                <option value="">Tüm Projeler</option>
+                {% for pr in all_projects %}
+                <option value="{{ pr }}" {% if pr == selected_project %}selected{% endif %}>{{ pr }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label fw-semibold">Başlangıç Tarihi</label>
+            <input type="date" name="start_date" class="form-control" value="{{ start_date or '' }}">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label fw-semibold">Bitiş Tarihi</label>
+            <input type="date" name="end_date" class="form-control" value="{{ end_date or '' }}">
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+            <button type="submit" class="btn btn-filter text-white me-2"><i class="fa-solid fa-search me-1"></i>Filtrele</button>
+            <a href="{{ url_for('all_expenses') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-refresh me-1"></i>Temizle</a>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <div class="card-body p-4">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th><i class="fa-solid fa-hashtag me-1"></i>#</th>
+                        <th><i class="fa-solid fa-building me-1"></i>Proje</th>
+                        <th><i class="fa-solid fa-receipt me-1"></i>Başlık</th>
+                        <th><i class="fa-solid fa-user me-1"></i>Tedarikçi</th>
+                        <th><i class="fa-solid fa-comment me-1"></i>Açıklama</th>
+                        <th class="text-end"><i class="fa-solid fa-money-bill-wave me-1"></i>Tutar (₺)</th>
+                        <th><i class="fa-solid fa-calendar me-1"></i>Tarih</th>
+                        <th><i class="fa-solid fa-tag me-1"></i>Tür</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in expenses %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td><span class="badge bg-primary">{{ e[0] }}</span></td>
+                        <td><strong>{{ e[1] }}</strong></td>
+                        <td>{{ e[5] or '-' }}</td>
+                        <td>{{ e[4] or '-' }}</td>
+                        <td class="text-end text-danger"><strong>{{ e[2]|thousands }}</strong></td>
+                        <td>{{ e[3].strftime('%d.%m.%Y') if e[3] else '-' }}</td>
+                        <td>
+                            {% if e[6] == 'Küçük Gider' %}
+                            <span class="badge bg-warning text-dark">{{ e[6] }}</span>
+                            {% else %}
+                            <span class="badge bg-danger">{{ e[6] }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if not expenses %}
+        <div class="text-center py-5">
+            <i class="fa-solid fa-inbox fa-3x text-muted mb-3"></i>
+            <h5 class="text-muted">Kayıtlı gider bulunamadı.</h5>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

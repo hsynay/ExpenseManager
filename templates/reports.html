@@ -1,77 +1,100 @@
 {% extends "base.html" %}
-
 {% block title %}Proje Finansal Raporları{% endblock %}
-
-{% block extra_head %}
-<style>
-    .report-card-header {
-        border-top-left-radius: 1rem;
-        border-top-right-radius: 1rem;
-    }
-</style>
-{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2 class="fw-bold"><i class="fa-solid fa-chart-pie me-2 text-primary"></i> Proje Raporları</h2>
-    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Ana Sayfaya Dön</a>
+    <h2 class="fw-bold"><i class="fa-solid fa-chart-line me-2 text-primary"></i> Proje Finansal Raporları</h2>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">
+        <i class="fa-solid fa-arrow-left me-1"></i>Geri
+    </a>
 </div>
 
 <div class="row g-4">
     {% if not project_summaries %}
-        <div class="col-12">
-            <div class="card text-center p-5"><i class="fa-solid fa-folder-open fa-3x text-muted mb-3"></i><p class="h5 text-muted">Raporlanacak proje bulunamadı.</p></div>
+        <div class="col-12 text-center text-muted p-5">
+            <i class="fa-solid fa-folder-open fa-3x mb-3"></i>
+            <p class="h5">Raporlanacak proje bulunamadı.</p>
         </div>
     {% else %}
-        {% for summary in project_summaries %}
+        {% for s in project_summaries %}
         <div class="col-lg-6">
-            {% if summary.project_type == 'normal' %}
-                <!-- NORMAL PROJE KARTI -->
-                <div class="card h-100">
-                    <div class="card-header report-card-header bg-primary text-white">
-                        <h5 class="mb-0 fw-bold"><i class="fa-solid fa-building me-2"></i>{{ summary.project_name }} (Normal)</h5>
-                    </div>
-                    <div class="card-body p-4">
-                        <h6 class="text-muted">Gelir Gerçekleşme Durumu</h6>
-                        <p class="h4 fw-bold">{{ "%.2f"|format(summary.collected_revenue) }} ₺ <span class="fs-6 text-muted">/ {{ "%.2f"|format(summary.planned_revenue) }} ₺</span></p>
-                        <div class="progress" style="height: 20px;"><div class="progress-bar fw-bold" role="progressbar" style="width: {{ summary.progress_percentage }}%;" aria-valuenow="{{ summary.progress_percentage }}">{{ "%.1f"|format(summary.progress_percentage) }}%</div></div>
-                        <hr>
-                        <ul class="list-group list-group-flush">
-                            <li class="list-group-item d-flex justify-content-between px-0"><span><i class="fa-solid fa-hourglass-half text-warning me-2"></i>Kalan Alacak:</span> <strong class="text-warning">{{ "%.2f"|format(summary.outstanding_debt) }} ₺</strong></li>
-                            <li class="list-group-item d-flex justify-content-between px-0"><span><i class="fa-solid fa-arrow-down text-danger me-2"></i>Toplam Gider:</span> <strong>{{ "%.2f"|format(summary.total_expenses) }} ₺</strong></li>
-                            <li class="list-group-item d-flex justify-content-between bg-light mt-2 rounded-2 px-2"><span><i class="fa-solid fa-wallet text-success me-2"></i>Net Nakit Durumu:</span> <strong class="h5 {% if summary.net_cash_flow < 0 %}text-danger{% else %}text-success{% endif %} mb-0">{{ "%.2f"|format(summary.net_cash_flow) }} ₺</strong></li>
-                        </ul>
-                        <hr>
-                        <h6 class="text-muted mt-3">Proje İstatistikleri</h6>
-                        <ul class="list-group list-group-flush">
-                            <li class="list-group-item d-flex justify-content-between px-0"><span><i class="fa-solid fa-door-closed text-info me-2"></i>Daire Durumu:</span> <strong>{{ summary.assigned_flats }} / {{ summary.total_flats }} <small>(Satılan/Toplam)</small></strong></li>
-                            <li class="list-group-item d-flex justify-content-between px-0"><span><i class="fa-solid fa-check-to-slot text-success me-2"></i>Ödenen Taksit Sayısı:</span> <strong>{{ summary.paid_installments }}</strong></li>
-                            <li class="list-group-item d-flex justify-content-between px-0"><span><i class="fa-solid fa-calendar-times text-danger me-2"></i>Gecikmiş Taksit Sayısı:</span> <strong class="{% if summary.overdue_installments > 0 %}text-danger{% endif %}">{{ summary.overdue_installments }}</strong></li>
-                            <li class="list-group-item d-flex justify-content-between px-0"><span><i class="fa-solid fa-receipt text-secondary me-2"></i>Toplam Gider Kalemi:</span> <strong>{{ summary.expense_count }}</strong></li>
-                        </ul>
-                    </div>
+            <div class="card h-100 shadow-sm">
+                <div class="card-header {% if s.project_type == 'normal' %}bg-primary{% else %}bg-success{% endif %} text-white fw-bold">
+                    <i class="fa-solid {% if s.project_type == 'normal' %}fa-building{% else %}fa-users{% endif %} me-2"></i>
+                    {{ s.project_name }} ({{ 'Normal' if s.project_type == 'normal' else 'Kooperatif' }})
                 </div>
-            {% else %}
-                <!-- KOOPERATİF PROJE KARTI -->
-                <div class="card h-100">
-                    <div class="card-header report-card-header bg-success text-white">
-                         <h5 class="mb-0 fw-bold"><i class="fa-solid fa-users me-2"></i>{{ summary.project_name }} (Kooperatif)</h5>
+                <div class="card-body p-4">
+
+                    {% if s.project_type == 'normal' %}
+                    <h5 class="text-muted mb-3"><i class="fa-solid fa-sack-dollar text-success me-2"></i>Gelir Durumu</h5>
+                    <ul class="list-group mb-3">
+                        <li class="list-group-item d-flex justify-content-between">
+                            Planlanan Toplam Gelir: <strong>{{ s.planned_revenue|thousands }} ₺</strong>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between">
+                            Ödenen Gelir: <strong class="text-success">{{ s.collected_revenue|thousands }} ₺</strong>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between">
+                            Kalan Gelir: <strong class="text-warning">{{ s.remaining_revenue|thousands }} ₺</strong>
+                        </li>
+                    </ul>
+
+                    <div class="progress mb-3" style="height: 18px;">
+                        <div class="progress-bar fw-bold" role="progressbar" style="width: {{ s.progress_percentage }}%;">
+                            {{ "%.1f"|format(s.progress_percentage) }}%
+                        </div>
                     </div>
-                     <div class="card-body p-4">
-                         <ul class="list-group list-group-flush">
-                            <li class="list-group-item d-flex justify-content-between align-items-center px-0"><div><i class="fa-solid fa-arrow-up text-primary me-2"></i>Üye Ödemeleri Toplamı</div><span class="badge bg-primary rounded-pill fs-6">{{ "%.2f"|format(summary.member_contributions) }} ₺</span></li>
-                            <li class="list-group-item d-flex justify-content-between align-items-center px-0"><div><i class="fa-solid fa-arrow-down text-danger me-2"></i>Proje Giderleri Toplamı</div><span class="badge bg-danger rounded-pill fs-6">{{ "%.2f"|format(summary.total_expenses) }} ₺</span></li>
-                            <li class="list-group-item d-flex justify-content-between align-items-center bg-light mt-2 rounded-2 px-2"><div class="fw-bold"><i class="fa-solid fa-vault text-success me-2"></i>Kasa Bakiyesi</div><span class="badge {% if summary.cash_balance < 0 %}bg-danger{% else %}bg-success{% endif %} rounded-pill fs-5">{{ "%.2f"|format(summary.cash_balance) }} ₺</span></li>
-                        </ul>
-                        <hr>
-                        <h6 class="text-muted mt-3">Proje İstatistikleri</h6>
-                        <ul class="list-group list-group-flush">
-                            <li class="list-group-item d-flex justify-content-between px-0"><span><i class="fa-solid fa-door-closed text-info me-2"></i>Daire Durumu:</span> <strong>{{ summary.assigned_flats }} / {{ summary.total_flats }} <small>(Atanan/Toplam)</small></strong></li>
-                            <li class="list-group-item d-flex justify-content-between px-0"><span><i class="fa-solid fa-receipt text-secondary me-2"></i>Toplam Gider Kalemi:</span> <strong>{{ summary.expense_count }}</strong></li>
-                        </ul>
-                    </div>
+
+                    <h5 class="text-muted mb-3"><i class="fa-solid fa-money-bill-transfer text-danger me-2"></i>Gider Durumu</h5>
+                    <ul class="list-group mb-3">
+                        <li class="list-group-item d-flex justify-content-between">
+                            Toplam Gider: <strong>{{ s.total_expenses|thousands }} ₺</strong>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between">
+                            Ödenen Gider: <strong class="text-success">{{ s.paid_expenses|thousands }} ₺</strong>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between">
+                            Kalan Gider: <strong class="text-warning">{{ s.remaining_expenses|thousands }} ₺</strong>
+                        </li>
+                    </ul>
+
+                    <hr>
+                    <p class="fw-bold">Net Nakit Durumu:
+                        <span class="fs-5 {% if s.net_cash_flow >= 0 %}text-success{% else %}text-danger{% endif %}">
+                            {{ s.net_cash_flow|thousands }} ₺
+                        </span>
+                    </p>
+
+                    {% else %}
+                    <h5 class="text-muted mb-3"><i class="fa-solid fa-hand-holding-dollar text-primary me-2"></i>Üye Katkıları</h5>
+                    <ul class="list-group mb-3">
+                        <li class="list-group-item d-flex justify-content-between">
+                            Toplam Katkı: <strong>{{ s.member_contributions|thousands }} ₺</strong>
+                        </li>
+                    </ul>
+
+                    <h5 class="text-muted mb-3"><i class="fa-solid fa-receipt text-danger me-2"></i>Gider Durumu</h5>
+                    <ul class="list-group mb-3">
+                        <li class="list-group-item d-flex justify-content-between">
+                            Toplam Gider: <strong>{{ s.total_expenses|thousands }} ₺</strong>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between">
+                            Ödenen Gider: <strong class="text-success">{{ s.paid_expenses|thousands }} ₺</strong>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between">
+                            Kalan Gider: <strong class="text-warning">{{ s.remaining_expenses|thousands }} ₺</strong>
+                        </li>
+                    </ul>
+
+                    <hr>
+                    <p class="fw-bold">Kasa Bakiyesi:
+                        <span class="fs-5 {% if s.cash_balance >= 0 %}text-success{% else %}text-danger{% endif %}">
+                            {{ s.cash_balance|thousands }} ₺
+                        </span>
+                    </p>
+                    {% endif %}
                 </div>
-            {% endif %}
+            </div>
         </div>
         {% endfor %}
     {% endif %}
