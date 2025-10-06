@@ -12,19 +12,19 @@
 </div>
 
 <div class="row g-4">
-    <div class="col-md-3"><div class="card text-center p-3"><div class="card-title text-muted">Önceki Aydan Devir</div><p class="h4 fw-bold {% if report_data.previous_balance < 0 %}text-danger{% endif %}">{{ "%.2f"|format(report_data.previous_balance) }} ₺</p></div></div>
-    <div class="col-md-3"><div class="card text-center p-3"><div class="card-title text-muted">Bu Ayki Gelir</div><p class="h4 fw-bold text-success">+ {{ "%.2f"|format(report_data.current_income) }} ₺</p></div></div>
-    <div class="col-md-3"><div class="card text-center p-3"><div class="card-title text-muted">Bu Ayki Gider</div><p class="h4 fw-bold text-danger">- {{ "%.2f"|format(report_data.current_expense) }} ₺</p></div></div>
-    <div class="col-md-3"><div class="card text-center bg-dark text-white p-3"><div class="card-title">Ay Sonu Bakiye</div><p class="h4 fw-bold {% if report_data.end_of_month_balance < 0 %}text-warning{% endif %}">{{ "%.2f"|format(report_data.end_of_month_balance) }} ₺</p></div></div>
+    <div class="col-md-3"><div class="card text-center p-3"><div class="card-title text-muted">Önceki Aydan Devir</div><p class="h4 fw-bold {% if report_data.previous_balance < 0 %}text-danger{% endif %}">{{ report_data.previous_balance|thousands }} ₺</p></div></div>
+    <div class="col-md-3"><div class="card text-center p-3"><div class="card-title text-muted">Bu Ayki Gelir</div><p class="h4 fw-bold text-success">+ {{ report_data.current_income|thousands }} ₺</p></div></div>
+    <div class="col-md-3"><div class="card text-center p-3"><div class="card-title text-muted">Bu Ayki Gider</div><p class="h4 fw-bold text-danger">- {{ report_data.current_expense|thousands }} ₺</p></div></div>
+    <div class="col-md-3"><div class="card text-center bg-dark text-white p-3"><div class="card-title">Ay Sonu Bakiye</div><p class="h4 fw-bold {% if report_data.end_of_month_balance < 0 %}text-warning{% endif %}">{{ report_data.end_of_month_balance|thousands }} ₺</p></div></div>
 
     <div class="col-12">
         <div class="card bg-light">
             <div class="card-body text-center">
                 <h5 class="card-title">Sonraki Ay İçin Aidat Hesaplama Yardımcısı</h5>
                 {% if report_data.end_of_month_balance < 0 and report_data.member_count > 0 %}
-                    <p class="lead">Ay sonunda kasada <strong class="text-danger">{{ "%.2f"|format(-report_data.end_of_month_balance) }} ₺</strong> açık bulunmaktadır.</p>
+                    <p class="lead">Ay sonunda kasada <strong class="text-danger">{{ (-report_data.end_of_month_balance)|thousands }} ₺</strong> açık bulunmaktadır.</p>
                     <p>Bu açığı kapatmak için, {{ report_data.member_count }} üyeden kişi başı toplanması gereken tavsiye edilen minimum aidat tutarı:</p>
-                    <p class="h3 fw-bold text-primary">{{ "%.2f"|format(-report_data.end_of_month_balance / report_data.member_count) }} ₺</p>
+                    <p class="h3 fw-bold text-primary">{{ (-report_data.end_of_month_balance / report_data.member_count)|thousands }} ₺</p>
                 {% elif report_data.member_count == 0 %}
                     <p class="text-muted">Aidat hesaplamak için projeye üye (daire sahibi) atanmalıdır.</p>
                 {% else %}
@@ -41,7 +41,7 @@
                 <thead><tr><th>Tarih</th><th>Müşteri</th><th>Açıklama</th><th class="text-end">Tutar</th></tr></thead>
                 <tbody>
                     {% for p in report_data.income_details %}
-                    <tr><td>{{ p[0].strftime('%d.%m') }}</td><td>{{ p[1] }}</td><td>{{ p[2] }}</td><td class="text-end text-success fw-bold">+ {{ "%.2f"|format(p[3]) }} ₺</td></tr>
+                    <tr><td>{{ p[0].strftime('%d.%m') }}</td><td>{{ p[1] }}</td><td>{{ p[2] }}</td><td class="text-end text-success fw-bold">+ {{ p[3]|thousands }} ₺</td></tr>
                     {% else %}
                     <tr><td colspan="4" class="text-center text-muted p-3">Bu ay gelir kaydı yok.</td></tr>
                     {% endfor %}
@@ -56,7 +56,7 @@
                 <thead><tr><th>Tarih</th><th>Başlık</th><th>Açıklama</th><th class="text-end">Tutar</th></tr></thead>
                 <tbody>
                     {% for e in report_data.expense_details %}
-                    <tr><td>{{ e[0].strftime('%d.%m') }}</td><td>{{ e[1] }}</td><td>{{ e[2] }}</td><td class="text-end text-danger fw-bold">- {{ "%.2f"|format(e[3]) }} ₺</td></tr>
+                    <tr><td>{{ e[0].strftime('%d.%m') }}</td><td>{{ e[1] }}</td><td>{{ e[2] }}</td><td class="text-end text-danger fw-bold">- {{ e[3]|thousands }} ₺</td></tr>
                     {% else %}
                     <tr><td colspan="4" class="text-center text-muted p-3">Bu ay gider kaydı yok.</td></tr>
                     {% endfor %}

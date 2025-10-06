@@ -14,14 +14,14 @@
                     <strong>Gider:</strong> {{ installment[4] }}<br>
                     <strong>Proje:</strong> {{ installment[5] }}<br>
                     <strong>Taksit Vadesi:</strong> {{ installment[1].strftime('%d.%m.%Y') }}<br>
-                    <strong>Taksit Tutarı:</strong> {{ "%.2f"|format(installment[2]) }} ₺<br>
-                    <strong>Kalan Borç:</strong> <span class="fw-bold text-danger">{{ "%.2f"|format(installment[2] - (installment[3] or 0)) }} ₺</span>
+                    <strong>Taksit Tutarı:</strong> {{ installment[2]|thousands }} ₺<br>
+                    <strong>Kalan Borç:</strong> <span class="fw-bold text-danger">{{ (installment[2] - (installment[3] or 0))|thousands }} ₺</span>
                 </div>
 
                 <form method="POST" action="{{ url_for('pay_expense_installment', installment_id=installment[0]) }}">
                     <div class="mb-3">
                         <label for="amount" class="form-label fw-semibold">Ödenecek Tutar (*)</label>
-                        <input type="number" step="0.01" class="form-control" id="amount" name="amount" value="{{ installment[2] - (installment[3] or 0) }}" required>
+                        <input type="text" class="form-control thousands-input" id="amount" name="amount" value="{{ installment[2] - (installment[3] or 0) }}" required>
                     </div>
                     <div class="mb-3">
                         <label for="payment_date" class="form-label fw-semibold">İşlem Tarihi (*)</label>

@@ -86,6 +86,7 @@
                                 <i class="fa-solid fa-calendar me-1"></i>Tarih {% if sort_by == 'tarih' %}<i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }}"></i>{% endif %}
                             </a>
                         </th>
+                        <th class="text-center">İşlemler</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -105,10 +106,16 @@
                             {% endif %}
                         </td>
                         <td>{{ p[11] or 'N/A' }}</td>
-                        <td class="text-end"><strong class="text-success">{{ "%.2f"|format(p[7]) }} ₺</strong></td>
+                        <td class="text-end"><strong class="text-success">{{ p[7]|thousands }} ₺</strong></td>
                         <td class="text-end">
                             <i class="fa-solid fa-calendar-day me-1 text-muted"></i>
                             {{ p[8].strftime('%d.%m.%Y') }}
+                        </td>
+                        <td class="text-center">
+                            <a href="{{ url_for('edit_payment', payment_id=p[0]) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
+                            <form action="{{ url_for('delete_payment', payment_id=p[0]) }}" method="POST" class="d-inline">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu geliri silmek istediğinizden emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
+                            </form>
                         </td>
                     </tr>
                     {% endfor %}

@@ -49,9 +49,9 @@
 
         <section class="mb-5">
              <div class="row text-center g-3">
-                    <div class="col-4"><div class="summary-box"><h6 class="text-muted mb-1">Toplam Borç</h6><p class="h5 fw-bold mb-0 text-primary">{{ "%.2f"|format(data.flat_total_price) }} ₺</p></div></div>
-                    <div class="col-4"><div class="summary-box"><h6 class="text-muted mb-1">Toplam Ödenen</h6><p class="h5 fw-bold mb-0 text-success">{{ "%.2f"|format(data.total_paid) }} ₺</p></div></div>
-                    <div class="col-4"><div class="summary-box"><h6 class="text-muted mb-1">Kalan Borç</h6><p class="h5 fw-bold mb-0 text-danger">{{ "%.2f"|format(data.remaining_debt) }} ₺</p></div></div>
+                    <div class="col-4"><div class="summary-box"><h6 class="text-muted mb-1">Toplam Borç</h6><p class="h5 fw-bold mb-0 text-primary">{{ data.flat_total_price|thousands }} ₺</p></div></div>
+                                        <div class="col-4"><div class="summary-box"><h6 class="text-muted mb-1">Toplam Ödenen</h6><p class="h5 fw-bold mb-0 text-success">{{ data.total_paid|thousands }} ₺</p></div></div>
+                                        <div class="col-4"><div class="summary-box"><h6 class="text-muted mb-1">Kalan Borç</h6><p class="h5 fw-bold mb-0 text-danger">{{ data.remaining_debt|thousands }} ₺</p></div></div>
                 </div>
         </section>
 
@@ -72,8 +72,8 @@
                     <tr>
                         <td class="text-center">{{ loop.index }}</td>
                         <td>{{ installment.due_date.strftime('%d.%m.%Y') }}</td>
-                        <td class="text-end">{{ "%.2f"|format(installment.amount) }} ₺</td>
-                        <td class="text-end fw-bold {% if installment.remaining_due > 0 %}text-danger{% endif %}">{{ "%.2f"|format(installment.remaining_due) }} ₺</td>
+                        <td class="text-end">{{ installment.amount|thousands }} ₺</td>
+                        <td class="text-end fw-bold {% if installment.remaining_due > 0 %}text-danger{% endif %}">{{ installment.remaining_due|thousands }} ₺</td>
                         <td class="text-center">
                             {% if installment.status == 'Ödendi' %}
                                 <span class="text-success fw-bold">{{ installment.status }}</span>
