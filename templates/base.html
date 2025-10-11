@@ -30,18 +30,16 @@
                     <ul class="dropdown-menu" aria-labelledby="financialDropdown">
                         <li><a class="dropdown-item" href="{{ url_for('assign_flat_owner') }}">Daire Satış Kaydı</a></li>
                         <li><a class="dropdown-item" href="{{ url_for('new_payment') }}">Yeni Gelir Kaydet</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item" href="{{ url_for('debt_status') }}">Gelir Muhasebe İşlemleri</a></li>
-                        <li><a class="dropdown-item" href="{{ url_for('list_expenses') }}">Gider Muhasebe İşlemleri</a></li>
                     </ul>
                 </li>
 
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_payment', 'list_payments', 'debt_status', 'select_project_for_expenses'] %}active{% endif %}" href="#" id="financialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="fa-solid fa-list me-1"></i> Görüntüle
+                        <i class="fa-solid fa-list me-1"></i> Muhasebe
                     </a>
                     <ul class="dropdown-menu" aria-labelledby="financialDropdown">
-                        <li><a class="dropdown-item" href="{{ url_for('list_payments') }}">Tamamlanmış Ödemeler</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('debt_status') }}">Gelir Muhasebe İşlemleri</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('list_expenses') }}">Gider Muhasebe İşlemleri</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="{{ url_for('list_checks') }}">Çek Takibi</a></li>
                     </ul>
@@ -88,6 +86,7 @@
     {% block scripts %}{% endblock %}
 
     <script>
+        
     // thousands-input: gösterimde nokta ile binlik ayır, ondalıkta virgül
     (function(){
         function parseNumberString(s){
@@ -147,7 +146,8 @@
                 el.form.appendChild(hidden);
             });
         }
-
+        window.initThousandsInput = initInput;
+        
         document.addEventListener('DOMContentLoaded', function(){
             document.querySelectorAll('.thousands-input').forEach(function(el){ initInput(el); });
         });
