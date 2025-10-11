@@ -1,148 +1,188 @@
 {% extends "base.html" %}
 
-{% block title %}{{ project_name }} - Giderler{% endblock %}
+{% block title %}
+    {% if detailed_view %}{{ project_name }} - Gider Yönetimi{% else %}Proje Giderleri{% endif %}
+{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h2 class="fw-bold mb-0"><i class="fa-solid fa-file-invoice-dollar me-2 text-danger"></i>Proje Gider Yönetimi</h2>
-        <p class="text-muted fs-5">{{ project_name }}</p>
+        <h2 class="fw-bold mb-0">
+            <i class="fa-solid fa-file-invoice-dollar me-2 text-danger"></i>Proje Gider Yönetimi
+        </h2>
+        {% if detailed_view %}
+            <p class="text-muted fs-5">{{ project_name }}</p>
+        {% endif %}
     </div>
     <div>
-        <a href="{{ url_for('add_expense', project_id=project_id) }}" class="btn btn-primary"><i class="fa-solid fa-plus me-1"></i>Yeni Planlı Gider</a>
+        {% if detailed_view %}
+            <a href="{{ url_for('add_expense', project_id=project_id) }}" class="btn btn-primary"><i class="fa-solid fa-plus me-1"></i>Yeni Planlı Gider</a>
+        {% endif %}
         <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Geri</a>
     </div>
 </div>
 
+<div class="filter-card mb-4">
+    <form class="row g-3" method="get" id="filterForm" action="{{ url_for('list_expenses') }}">
+        <div class="col-md-8">
+            <label class="form-label fw-semibold">Giderlerini Görmek İçin Proje Seçin</label>
+            <select name="project_id" class="form-select" onchange="this.form.submit()">
+                <option value="" selected disabled>Lütfen bir proje seçin...</option>
+                {% for pr in all_projects %}
+                <option value="{{ pr[0] }}" {% if pr[0]|string == selected_project_id %}selected{% endif %}>{{ pr[1] }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+</div>
+
 {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, msg in messages %}
-        <div class="alert alert-{{category}}">{{msg}}</div>
-    {% endfor %}
+    {% for category, msg in messages %}<div class="alert alert-{{category}}">{{msg}}</div>{% endfor %}
 {% endwith %}
 
-<div class="card mb-4">
-    <div class="card-body text-center p-3">
-        <h6 class="text-muted mb-1">PROJENİN TOPLAM GİDERİ</h6>
-    <h4 class="fw-bold text-danger mb-0">{{ total_project_expense|thousands }} ₺</h4>
-        <br>
-        <h6 class="text-muted mb-1">PROJENİN ÖDENEN GİDERİ</h6>
-    <h4 class="fw-bold text-success mb-0">{{ total_paid_project|thousands }} ₺</h4>
-        <br>
-        <h6 class="text-muted mb-1">PROJENİN KALAN GİDERİ</h6>
-    <h4 class="fw-bold text-dark mb-0">{{ total_remaining_due|thousands }} ₺</h4>
-    </div>
-</div>
-
-<div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0"><i class="fa-solid fa-coins me-2 text-warning"></i>Proje Genel Giderleri (Fiş, Yemek vb.)</h5>
-        <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#addPettyCashModal">
-            <i class="fa-solid fa-plus me-1"></i>Yeni Küçük Gider Ekle
-        </button>
-    </div>
-    <div class="card-body table-responsive p-0">
-        <table class="table table-sm table-striped mb-0">
-            <thead><tr><th>Tarih</th><th>Açıklama</th><th class="text-end">Tutar</th></tr></thead>
-            <tbody>
-                {% for item in petty_cash_items %}
-                <tr>
-                    <td>{{ item[3].strftime('%d.%m.%Y') }}</td>
-                    <td>{{ item[1] }}</td>
-                    <td class="text-end fw-bold">{{ item[2]|thousands }} ₺</td>
-                    <td class="text-end">
-                        <a href="{{ url_for('edit_petty_cash', item_id=item[0], project_id=project_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
-                        <form action="{{ url_for('delete_petty_cash', item_id=item[0]) }}" method="POST" class="d-inline">
-                            <input type="hidden" name="project_id" value="{{ project_id }}">
-                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu küçük gider kaydını silmek istediğinizden emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
-                        </form>
-                    </td>
-                </tr>
-                {% else %}
-                <tr><td colspan="4" class="text-center text-muted p-3">Henüz küçük gider kaydı yok.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<h4 class="mt-5 mb-3">Planlı Büyük Giderler (Tedarikçi Borçları)</h4>
-
-{% if not expenses_data %}
-    <div class="card text-center p-5">
-        <p class="h5 text-muted">Bu proje için tanımlanmış planlı gider bulunamadı.</p>
-    </div>
-{% endif %}
-
-{% for expense in expenses_data %}
-<div class="card mb-4">
-    <div class="card-header bg-light d-flex justify-content-between align-items-center flex-wrap">
-        <div>
-            <strong class="me-3"><i class="fa-solid fa-file-signature text-muted"></i> Gider: {{ expense.title }}</strong>
-            <strong class="me-3"><i class="fa-solid fa-truck-fast text-muted"></i> Tedarikçi: {{ expense.supplier_name }}</strong>
+{% if detailed_view %}
+    <div class="card mb-4"><div class="card-body text-center p-3"><div class="row">
+        <div class="col-4 border-end"><h6 class="text-muted mb-1">PROJE TOPLAM GİDERİ</h6><h4 class="fw-bold text-danger mb-0">{{ total_project_expense|thousands }} ₺</h4></div>
+        <div class="col-4 border-end"><h6 class="text-muted mb-1">ÖDENEN GİDER</h6><h4 class="fw-bold text-success mb-0">{{ total_paid_project|thousands }} ₺</h4></div>
+        <div class="col-4"><h6 class="text-muted mb-1">KALAN GİDER BORCU</h6><h4 class="fw-bold text-dark mb-0">{{ total_remaining_due|thousands }} ₺</h4></div>
+    </div></div></div>
+    
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="fa-solid fa-coins me-2 text-warning"></i>Proje Genel Giderleri (Fiş, Yemek vb.)</h5>
+            <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#addPettyCashModal"><i class="fa-solid fa-plus me-1"></i>Yeni Küçük Gider Ekle</button>
         </div>
-        <div>
-            <a href="{{ url_for('manage_expense_plan', expense_id=expense.expense_id) }}" class="btn btn-outline-warning btn-sm" title="Gideri ve Planını Yönet"><i class="fa-solid fa-edit me-1"></i>Planı Yönet</a>
-            <form action="{{ url_for('delete_expense', expense_id=expense.expense_id) }}" method="POST" class="d-inline">
-                <input type="hidden" name="project_id" value="{{ project_id }}">
-                <button type="submit" class="btn btn-outline-danger btn-sm" title="Gideri Sil" onclick="return confirm('Bu gideri ve tüm taksit planını silmek istediğinizden emin misiniz?')"><i class="fa-solid fa-trash-alt"></i></button>
-            </form>
-        </div>
-    </div>
-    <div class="card-body p-4">
-        <div class="row text-center mb-4 g-3">
-            <div class="col-md-4"><div class="p-3 border rounded-3"><h6 class="text-muted mb-1">Toplam Borç</h6><p class="h5 fw-bold mb-0 text-primary">{{ expense.total_amount|thousands }} ₺</p></div></div>
-            <div class="col-md-4"><div class="p-3 border rounded-3"><h6 class="text-muted mb-1">Toplam Ödenen</h6><p class="h5 fw-bold mb-0 text-success">{{ expense.total_paid|thousands }} ₺</p></div></div>
-            <div class="col-md-4"><div class="p-3 border rounded-3"><h6 class="text-muted mb-1">Kalan Borç</h6><p class="h5 fw-bold mb-0 text-danger">{{ expense.remaining_due|thousands }} ₺</p></div></div>
-        </div>
-        
-        <div class="table-responsive">
-            <table class="table table-bordered table-hover align-middle table-sm">
-                <thead class="table-secondary">
-                    <tr>
-                        <th>Vade Tarihi</th><th class="text-end">Taksit Tutarı</th><th class="text-end">Kalan</th><th class="text-center">Durum</th><th class="text-center">Ödeme Yap</th>
-                    </tr>
-                </thead>
+        <div class="card-body table-responsive p-0">
+            <table class="table table-sm table-striped table-hover mb-0">
+                <thead><tr><th>Tarih</th><th>Açıklama</th><th class="text-end">Tutar</th><th class="text-end">İşlemler</th></tr></thead>
                 <tbody>
-                    {% for installment in expense.installments %}
-                    <tr class="{{ installment.css_class }}">
-                        <td>{{ installment.due_date.strftime('%d.%m.%Y') }}</td>
-                        <td class="text-end fw-bold">{{ installment.total_amount|thousands }} ₺</td>
-                        <td class="text-end fw-bold text-danger">{{ installment.remaining_installment_due|thousands }} ₺</td>
-                        <td class="text-center"><span class="badge {% if installment.status == 'Ödendi' %} bg-success {% elif 'Kısmen' in installment.status %} bg-warning text-dark {% elif installment.status == 'Gecikmiş' %} bg-danger {% else %} bg-secondary {% endif %}">{{ installment.status }}</span></td>
-                        <td class="text-center">
-                            {% if not installment.is_paid %}<a href="{{ url_for('pay_expense_installment', installment_id=installment.id) }}" class="btn btn-sm btn-success"><i class="fa-solid fa-cash-register me-1"></i> Öde</a>{% else %}<i class="fa-solid fa-check-circle text-success fs-5"></i>{% endif %}
+                    {% for item in petty_cash_items %}
+                    <tr>
+                        <td>{{ item[3].strftime('%d.%m.%Y') }}</td><td>{{ item[1] }}</td><td class="text-end fw-bold">{{ item[2]|thousands }} ₺</td>
+                        <td class="text-end">
+                            <a href="{{ url_for('edit_petty_cash', item_id=item[0], project_id=project_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
+                            <form action="{{ url_for('delete_petty_cash', item_id=item[0]) }}" method="POST" class="d-inline">
+                                <input type="hidden" name="project_id" value="{{ project_id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu gideri silmek istediğinizden emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
+                            </form>
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="5" class="text-center text-muted p-2 small">Bu gider için ödeme planı oluşturulmamış.</td></tr>
+                    <tr><td colspan="4" class="text-center text-muted p-3">Küçük gider kaydı yok.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
     </div>
-</div>
-{% endfor %}
 
-<div class="modal fade" id="addPettyCashModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Yeni Küçük Gider Ekle</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    <h4 class="mt-5 mb-3">Planlı Büyük Giderler (Tedarikçi Borçları)</h4>
+    {% for expense in expenses_data %}
+    <div class="card mb-4">
+        <div class="card-header bg-light d-flex justify-content-between align-items-center flex-wrap">
+            <div>
+                <strong class="me-3"><i class="fa-solid fa-file-signature text-muted"></i> Gider: {{ expense.title }}</strong>
+                <strong class="me-3"><i class="fa-solid fa-truck-fast text-muted"></i> Tedarikçi: {{ expense.supplier_name }}</strong>
             </div>
-            <form action="{{ url_for('add_petty_cash', project_id=project_id) }}" method="POST">
-                <div class="modal-body">
-                    <div class="mb-3"><label for="petty_cash_title" class="form-label">Başlık (*)</label><input type="text" name="petty_cash_title" class="form-control" required></div>
-                    <div class="mb-3"><label for="petty_cash_amount" class="form-label">Tutar (₺) (*)</label><input type="number" step="0.01" name="petty_cash_amount" class="form-control thousands-input" required></div>
-                    <div class="mb-3"><label for="petty_cash_date" class="form-label">Tarih (*)</label><input type="date" name="petty_cash_date" class="form-control" required></div>
-                    <div class="mb-3"><label for="petty_cash_description" class="form-label">Açıklama</label><textarea name="petty_cash_description" class="form-control" rows="2"></textarea></div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
-                    <button type="submit" class="btn btn-primary">Kaydet</button>
-                </div>
-            </form>
+            <div>
+                <a href="{{ url_for('manage_expense_plan', expense_id=expense.expense_id) }}" class="btn btn-outline-warning btn-sm" title="Planı Yönet"><i class="fa-solid fa-edit me-1"></i>Planı Yönet</a>
+                <form action="{{ url_for('delete_expense', expense_id=expense.expense_id) }}" method="POST" class="d-inline">
+                    <input type="hidden" name="project_id" value="{{ project_id }}">
+                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Gideri Sil" onclick="return confirm('Bu gideri ve tüm taksitlerini silmek istediğinizden emin misiniz?')"><i class="fa-solid fa-trash-alt"></i></button>
+                </form>
+            </div>
+        </div>
+        <div class="card-body p-4">
+            <div class="row text-center mb-4 g-3">
+                <div class="col-md-4"><div class="p-3 border rounded-3"><h6 class="text-muted mb-1">Toplam Borç</h6><p class="h5 fw-bold mb-0 text-primary">{{ expense.total_amount|thousands }} ₺</p></div></div>
+                <div class="col-md-4"><div class="p-3 border rounded-3"><h6 class="text-muted mb-1">Toplam Ödenen</h6><p class="h5 fw-bold mb-0 text-success">{{ expense.total_paid|thousands }} ₺</p></div></div>
+                <div class="col-md-4"><div class="p-3 border rounded-3"><h6 class="text-muted mb-1">Kalan Borç</h6><p class="h5 fw-bold mb-0 text-danger">{{ expense.remaining_due|thousands }} ₺</p></div></div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover align-middle table-sm">
+                    <thead class="table-secondary"><tr><th>Vade Tarihi</th><th class="text-end">Taksit Tutarı</th><th class="text-end">Kalan</th><th class="text-center">Durum</th><th class="text-center">Ödeme Yap</th></tr></thead>
+                    <tbody>
+                        {% for installment in expense.installments %}
+                        <tr class="{{ installment.css_class }}">
+                            <td>{{ installment.due_date.strftime('%d.%m.%Y') }}</td><td class="text-end fw-bold">{{ installment.total_amount|thousands }} ₺</td><td class="text-end fw-bold text-danger">{{ installment.remaining_installment_due|thousands }} ₺</td>
+                            <td class="text-center"><span class="badge {% if installment.status == 'Ödendi' %} bg-success {% elif 'Kısmen' in installment.status %} bg-warning text-dark {% elif installment.status == 'Gecikmiş' %} bg-danger {% else %} bg-secondary {% endif %}">{{ installment.status }}</span></td>
+                            <td class="text-center">{% if not installment.is_paid %}<a href="{{ url_for('pay_expense_installment', installment_id=installment.id) }}" class="btn btn-sm btn-success"><i class="fa-solid fa-cash-register me-1"></i> Öde</a>{% else %}<i class="fa-solid fa-check-circle text-success fs-5"></i>{% endif %}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="5" class="text-center text-muted p-2 small">Ödeme planı oluşturulmamış.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="card-footer bg-white p-3">
+            <h6 class="mb-2"><strong><i class="fa-solid fa-cash-register text-muted"></i> Bu Gidere Ait Gerçekleşen Ödemeler</strong></h6>
+            <div class="table-responsive">
+                <table class="table table-sm table-striped table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Ödeme Tarihi</th>
+                            <th>Açıklama</th>
+                            <th>Yöntem</th>
+                            <th class="text-end">Tutar</th>
+                            <th class="text-center">İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p_exp_id, p_id, p_date, p_desc, p_amount, p_method in expense.payments %}
+                        <tr>
+                            <td>{{ p_date.strftime('%d.%m.%Y') }}</td>
+                            <td>{{ p_desc or '-' }}</td>
+                            <td>
+                                {% if p_method == 'çek' %}
+                                    <span class="badge bg-info text-dark">Çek</span>
+                                {% else %}
+                                    <span class="badge bg-success">Nakit</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
+                            <td class="text-center">
+                                <a href="{{ url_for('edit_supplier_payment', payment_id=p_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
+                                <form action="{{ url_for('delete_supplier_payment', payment_id=p_id) }}" method="POST" class="d-inline">
+                                    <input type="hidden" name="project_id" value="{{ project_id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu ödemeyi silmek istediğinizden emin misiniz? Bu işlem ilgili taksitlerin durumunu yeniden hesaplayacaktır.')" title="Sil"><i class="fa-solid fa-trash"></i></button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted p-2 small">Bu gidere ait henüz fiili bir ödeme kaydedilmemiş.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
-</div>
+    {% else %}
+        {% if detailed_view %}<div class="card text-center p-5"><p class="h5 text-muted">Bu proje için planlı gider bulunamadı.</p></div>{% endif %}
+    {% endfor %}
+
+    <div class="modal fade" id="addPettyCashModal" tabindex="-1">
+        <div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Yeni Küçük Gider Ekle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <form action="{{ url_for('add_petty_cash', project_id=project_id) }}" method="POST">
+                <div class="modal-body">
+                    <div class="mb-3"><label class="form-label">Başlık (*)</label><input type="text" name="petty_cash_title" class="form-control" required></div>
+                    <div class="mb-3"><label class="form-label">Tutar (₺) (*)</label><input type="text" name="petty_cash_amount" class="form-control thousands-input" required></div>
+                    <div class="mb-3"><label class="form-label">Tarih (*)</label><input type="date" name="petty_cash_date" class="form-control" required></div>
+                    <div class="mb-3"><label class="form-label">Açıklama</label><textarea name="petty_cash_description" class="form-control" rows="2"></textarea></div>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Kaydet</button></div>
+            </form>
+        </div></div>
+    </div>
+
+{% else %}
+    <div class="card">
+        <div class="card-body text-center p-5">
+            <i class="fa-solid fa-hand-pointer fa-3x text-muted mb-3"></i>
+            <h4 class="text-muted">Giderleri görüntülemek için lütfen yukarıdan bir proje seçin.</h4>
+        </div>
+    </div>
+{% endif %}
 {% endblock %}

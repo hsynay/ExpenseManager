@@ -22,6 +22,7 @@
 </head>
 <body>
 
+    <!-- Navbar -->
 <nav class="navbar navbar-expand-lg navbar-dark fixed-top shadow">
     <div class="container">
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"><span class="navbar-toggler-icon"></span></button>
@@ -30,30 +31,41 @@
                 <li class="nav-item">
                     <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><i class="fa-solid fa-home me-1"></i>Ana Sayfa</a>
                 </li>
-
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_project', 'assign_flat_owner'] %}active{% endif %}" href="#" id="projectDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="fa-solid fa-folder-tree me-1"></i> Projeler
-                    </a>
-                    <ul class="dropdown-menu" aria-labelledby="projectDropdown">
-                        <li><a class="dropdown-item" href="{{ url_for('new_project') }}">Yeni Proje Ekle</a></li>
-                        <li><a class="dropdown-item" href="{{ url_for('assign_flat_owner') }}">Daire Sahibi Ata</a></li>
-                    </ul>
-                </li>
-
+                <li class="nav-item mx-3"></li>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_payment', 'list_payments', 'debt_status', 'select_project_for_expenses'] %}active{% endif %}" href="#" id="financialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fa-solid fa-coins me-1"></i> Finansal
                     </a>
                     <ul class="dropdown-menu" aria-labelledby="financialDropdown">
+                        <li><a class="dropdown-item" href="{{ url_for('assign_flat_owner') }}">Daire Satış Kaydı</a></li>
                         <li><a class="dropdown-item" href="{{ url_for('new_payment') }}">Yeni Gelir Kaydet</a></li>
-                        <li><a class="dropdown-item" href="{{ url_for('list_payments') }}">Tüm Gelirler</a></li>
-                        <li><a class="dropdown-item" href="{{ url_for('debt_status') }}">Borç Defteri</a></li>
                         <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item" href="{{ url_for('select_project_for_expenses') }}">Proje Giderleri</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('debt_status') }}">Gelir Muhasebe İşlemleri</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('list_expenses') }}">Gider Muhasebe İşlemleri</a></li>
+                    </ul>
+                </li>
+
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_payment', 'list_payments', 'debt_status', 'select_project_for_expenses'] %}active{% endif %}" href="#" id="financialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fa-solid fa-list me-1"></i> Görüntüle
+                    </a>
+                    <ul class="dropdown-menu" aria-labelledby="financialDropdown">
+                        <li><a class="dropdown-item" href="{{ url_for('list_payments') }}">Tamamlanmış Ödemeler</a></li>
+                        <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="{{ url_for('list_checks') }}">Çek Takibi</a></li>
                     </ul>
                 </li>
+                
+                <!--
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['list_customers'] %}active{% endif %}" href="#" id="adminDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fa-solid fa-users-cog me-1"></i> Yönetim
+                    </a>
+                    <ul class="dropdown-menu" aria-labelledby="adminDropdown">
+                        <li><a class="dropdown-item" href="{{ url_for('list_customers') }}">Müşteriler</a></li>
+                    </ul>
+                </li>
+                -->
 
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle {% if request.endpoint in ['reports', 'select_project_for_coop_report'] %}active{% endif %}" href="#" id="reportsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fa-solid fa-chart-pie me-1"></i> Raporlar</a>
@@ -73,7 +85,6 @@
         </div>
     </div>
 </nav>
-
 <div class="container my-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="fw-bold"><i class="fa-solid fa-file-invoice-dollar me-2 text-primary"></i> Borç Defteri (Proje Bazlı)</h2>
@@ -110,7 +121,7 @@
                             </div>
                             <div>
                                 <a href="{{ url_for('print_debt_statement', flat_id=flat.flat_id) }}" target="_blank" class="btn btn-secondary btn-sm me-2" title="Döküm Yazdır"><i class="fa-solid fa-print"></i> Yazdır</a>
-                                <a href="{{ url_for('manage_payment_plan', flat_id=flat.flat_id) }}" class="btn btn-info btn-sm" title="Planı Yönet"><i class="fa-solid fa-edit"></i> Düzenle</a>
+                                <a href="{{ url_for('manage_payment_plan', flat_id=flat.flat_id) }}" class="btn btn-info btn-sm" title="Planı Yönet"><i class="fa-solid fa-edit"></i> Planı Yönet</a>
                             </div>
                         </div>
                         <div class="card-body p-3">
@@ -121,6 +132,7 @@
                             </div>
                             <div class="table-responsive">
                                 <table class="table table-bordered table-sm">
+                                    <thead class="table-light"><tr><th>Vade Tarihi</th><th class="text-end">Taksit Tutarı</th><th class="text-end">Kalan</th><th class="text-center">Durum</th></tr></thead>
                                     <tbody>
                                         {% for inst in flat.installments %}
                                         <tr class="{{ inst.css_class }}"><td>{{ inst.due_date.strftime('%d.%m.%Y') }}</td><td class="text-end">{{ inst.total_amount|thousands }} ₺</td><td class="text-end fw-bold">{{ inst.remaining_installment_due|thousands }} ₺</td><td class="text-center"><span class="badge small {% if inst.status == 'Ödendi' %} bg-success {% elif 'Kısmen' in inst.status %} bg-warning text-dark {% elif inst.status == 'Gecikmiş' %} bg-danger {% else %} bg-secondary {% endif %}">{{ inst.status }}</span></td></tr>
@@ -147,24 +159,32 @@
                                                 <th>Açıklama</th>
                                                 <th>Yöntem</th>
                                                 <th class="text-end">Tutar</th>
+                                                <th class="text-center">İşlemler</th>
                                             </tr>
                                         </thead>
-                                        <tbody>
-                                            {% for p_id, p_date, p_desc, p_amount, p_method in flat.payments %}
-                                            <tr class="{% if p_method == 'çek' %}table-info{% endif %}">
-                                                <td>{{ p_date.strftime('%d.%m.%Y') }}</td>
-                                                <td>{{ p_desc }}</td>
-                                                <td>
-                                                    {% if p_method == 'çek' %}
-                                                        <span class="badge bg-info text-dark"><i class="fa-solid fa-money-check-dollar me-1"></i> Çek</span>
-                                                    {% else %}
-                                                        <span class="badge bg-success"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
-                                                    {% endif %}
-                                                </td>
-                                                <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
-                                            </tr>
-                                            {% endfor %}
-                                        </tbody>
+                                            <tbody>
+                                                {# DÜZELTME: Döngüdeki değişken sayısı 6'ya çıkarıldı (p_flat_id eklendi) #}
+                                                {% for p_id, p_flat_id, p_date, p_desc, p_amount, p_method in flat.payments %}
+                                                <tr class="{% if p_method == 'çek' %}table-info{% endif %}">
+                                                    <td>{{ p_date.strftime('%d.%m.%Y') }}</td>
+                                                    <td>{{ p_desc }}</td>
+                                                    <td>
+                                                        {% if p_method == 'çek' %}
+                                                            <span class="badge bg-info text-dark"><i class="fa-solid fa-money-check-dollar me-1"></i> Çek</span>
+                                                        {% else %}
+                                                            <span class="badge bg-success"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
+                                                    <td class="text-center">
+                                                        <a href="{{ url_for('edit_payment', payment_id=p_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
+                                                        <form action="{{ url_for('delete_payment', payment_id=p_id) }}" method="POST" class="d-inline">
+                                                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu ödemeyi silerseniz, ilgili taksitlerin durumu yeniden hesaplanacaktır. Emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
+                                                        </form>
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
                                     </table>
                                 </div>
                             </div>
@@ -199,10 +219,11 @@
                                                 <th>Açıklama</th>
                                                 <th>Yöntem</th>
                                                 <th class="text-end">Tutar</th>
+                                                <th class="text-center">İşlemler</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {% for p_id, p_date, p_desc, p_amount, p_method in flat.payments %}
+                                            {% for p_id, p_flat_id, p_date, p_desc, p_amount, p_method in flat.payments %}
                                             <tr class="{% if p_method == 'çek' %}table-info{% endif %}">
                                                 <td>{{ p_date.strftime('%d.%m.%Y') }}</td>
                                                 <td>{{ p_desc }}</td>
@@ -214,6 +235,12 @@
                                                     {% endif %}
                                                 </td>
                                                 <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
+                                                <td class="text-center">
+                                                    <a href="{{ url_for('edit_payment', payment_id=p_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
+                                                    <form action="{{ url_for('delete_payment', payment_id=p_id) }}" method="POST" class="d-inline">
+                                                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu ödemeyi silerseniz, ilgili taksitlerin durumu yeniden hesaplanacaktır. Emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
+                                                    </form>
+                                                </td>
                                             </tr>
                                             {% endfor %}
                                         </tbody>
