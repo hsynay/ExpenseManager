@@ -86,18 +86,15 @@
                                 <i class="fa-solid fa-calendar me-1"></i>Tarih {% if sort_by == 'tarih' %}<i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }}"></i>{% endif %}
                             </a>
                         </th>
-                        <th class="text-center">İşlemler</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for p in payments %}
-                    {# DÜZENLEME: p[10] (payment_method) 'çek' ise satıra 'table-info' class'ı ekleniyor #}
                     <tr class="{% if p[10] == 'çek' %}table-info{% endif %}">
                         <td><span class="badge bg-secondary">{{ p[0] }}</span></td>
                         <td><span class="badge bg-primary">{{ p[1] }}</span></td>
                         <td><strong>{{ p[2] }} {{ p[3] }}</strong></td>
                         <td>Blok: {{ p[9] or 'N/A' }}, Kat: {{ p[5] }}, No: <strong>{{ p[4] }}</strong></td>
-                        {# YENİ SÜTUN: Ödeme Yöntemi ikonu ve yazısı gösteriliyor #}
                         <td>
                             {% if p[10] == 'çek' %}
                                 <span class="badge bg-info text-dark"><i class="fa-solid fa-money-check-dollar me-1"></i> Çek</span>
@@ -110,12 +107,6 @@
                         <td class="text-end">
                             <i class="fa-solid fa-calendar-day me-1 text-muted"></i>
                             {{ p[8].strftime('%d.%m.%Y') }}
-                        </td>
-                        <td class="text-center">
-                            <a href="{{ url_for('edit_payment', payment_id=p[0]) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
-                            <form action="{{ url_for('delete_payment', payment_id=p[0]) }}" method="POST" class="d-inline">
-                                <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu geliri silmek istediğinizden emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
-                            </form>
                         </td>
                     </tr>
                     {% endfor %}
