@@ -145,8 +145,9 @@
                         </div>
                         <div class="btn-group" role="group">
                              {# Projeler blueprint'ine taşındığı varsayılarak url_for güncellendi #}
-                            <a href="{{ url_for('project_transactions', project_id=project.id) }}" class="btn btn-secondary btn-sm"><i class="fa-solid fa-chart-column me-1"></i> Gelir & Gider</a>
-                            <a href="{{ url_for('list_expenses', project_id=project.id) }}" class="btn btn-primary btn-sm"><i class="fa-solid fa-file-invoice-dollar me-1"></i> Giderler</a>
+                            <a href="{{ url_for('project_overview', project_id=project.id) }}" class="btn btn-info btn-sm"><i class="fa-solid fa-timeline me-1"></i>Genel Bakış</a>
+                            <a href="{{ url_for('project_transactions', project_id=project.id) }}" class="btn btn-secondary btn-sm"><i class="fa-solid fa-list -column me-1"></i> Gelir & Gider</a>
+                            <a href="{{ url_for('list_expenses', project_id=project.id) }}" class="btn btn-primary btn-sm"><i class="fa-solid fa-file-invoice-dollar me-1"></i> Gider Düzenle</a>
                             <a href="{{ url_for('edit_project', project_id=project.id) }}" class="btn btn-warning btn-sm"><i class="fa-solid fa-pencil me-1"></i> Düzenle</a>
                             <form action="{{ url_for('delete_project', project_id=project.id) }}" method="POST" class="d-inline">
                                 <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Bu projeyi ve tüm alt verilerini silmek istediğinizden emin misiniz?')"><i class="fa-solid fa-trash-alt me-1"></i> Sil</button>

@@ -119,7 +119,7 @@ def new_project():
         conn.close()
 
         flash('Proje başarıyla eklendi. Şimdi daireleri tanımlayabilirsiniz.', 'success')
-        return redirect(url_for('add_flats', project_id=project_id))  # <--- Buraya yönlendir
+        return redirect(url_for('manage_flats', project_id=project_id)) # YENİ YÖNLENDİRME
 
     return render_template('project_new.html')
 
@@ -127,11 +127,82 @@ def new_project():
 
 # add_flats fonksiyonu
 
-@app.route('/project/<int:project_id>/flats', methods=['GET', 'POST'])
-def add_flats(project_id):
+# @app.route('/project/<int:project_id>/flats', methods=['GET', 'POST'])
+# def add_flats(project_id):
+#     """
+#     Bir projedeki tüm daireleri yönetir (CRUD).
+#     POST isteğinde, projenin tüm dairelerini siler ve formdan gelen yeni listeyi kaydeder.
+#     """
+#     if 'user_id' not in session:
+#         return redirect(url_for('login'))
+
+#     conn = get_connection()
+#     cur = conn.cursor()
+
+#     if request.method == 'POST':
+#         # Formdan gelen tüm daire verilerini listeler halinde al
+#         block_names = request.form.getlist('block_name[]')
+#         flat_nos = request.form.getlist('flat_no[]')
+#         floors = request.form.getlist('floor[]')
+#         room_types = request.form.getlist('room_type[]')
+        
+#         try:
+#             # 1. Önce bu projeye ait tüm mevcut daireleri sil (temiz bir başlangıç için)
+#             cur.execute("DELETE FROM flats WHERE project_id = %s", (project_id,))
+            
+#             # 2. Formdan gelen güncel listeyi veritabanına yeniden ekle
+#             for block, flat_no, floor, room_type in zip(block_names, flat_nos, floors, room_types):
+#                 # Sadece dolu satırların kaydedildiğinden emin ol
+#                 if block and flat_no and floor and room_type:
+#                     cur.execute("""
+#                         INSERT INTO flats (project_id, block_name, flat_no, floor, room_type)
+#                         VALUES (%s, %s, %s, %s, %s)
+#                     """, (project_id, block.strip(), flat_no, floor, room_type.strip()))
+            
+#             conn.commit()
+#             flash('Daire listesi başarıyla güncellendi.', 'success')
+#             return redirect(url_for('assign_flat_owner'))
+
+#         except Exception as e:
+#             conn.rollback()
+#             flash(f'Daireler güncellenirken bir hata oluştu: {e}', 'danger')
+#             return redirect(url_for('add_flats', project_id=project_id))
+#         finally:
+#             cur.close()
+#             conn.close()
+
+#     # GET isteği için: Proje adını ve mevcut daireleri çek
+#     try:
+#         cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
+#         project = cur.fetchone()
+#         if not project:
+#             flash('Proje bulunamadı.', 'danger')
+#             return redirect(url_for('dashboard'))
+#         project_name = project[0]
+        
+#         # Mevcut daireleri forma doldurmak için çek
+#         cur.execute("SELECT block_name, flat_no, floor, room_type FROM flats WHERE project_id = %s ORDER BY block_name, floor, flat_no", (project_id,))
+#         existing_flats = cur.fetchall()
+        
+#     except Exception as e:
+#         flash(f'Veri alınırken bir hata oluştu: {e}', 'danger')
+#         project_name = "Bilinmeyen Proje"
+#         existing_flats = []
+#     finally:
+#         cur.close()
+#         conn.close()
+
+#     return render_template('project_flats.html', 
+#                            project_id=project_id, 
+#                            project_name=project_name,
+#                            existing_flats=existing_flats)
+
+
+@app.route('/project/<int:project_id>/manage_flats', methods=['GET', 'POST'])
+def manage_flats(project_id):
     """
-    Bir projedeki tüm daireleri yönetir (CRUD).
-    POST isteğinde, projenin tüm dairelerini siler ve formdan gelen yeni listeyi kaydeder.
+    Bir projedeki daireleri akıllıca yönetir (ekler, günceller, sahibi olmayanları siler).
+    Mevcut ve satılmış daireleri korur.
     """
     if 'user_id' not in session:
         return redirect(url_for('login'))
@@ -140,25 +211,46 @@ def add_flats(project_id):
     cur = conn.cursor()
 
     if request.method == 'POST':
-        # Formdan gelen tüm daire verilerini listeler halinde al
-        block_names = request.form.getlist('block_name[]')
-        flat_nos = request.form.getlist('flat_no[]')
-        floors = request.form.getlist('floor[]')
-        room_types = request.form.getlist('room_type[]')
-        
         try:
-            # 1. Önce bu projeye ait tüm mevcut daireleri sil (temiz bir başlangıç için)
-            cur.execute("DELETE FROM flats WHERE project_id = %s", (project_id,))
-            
-            # 2. Formdan gelen güncel listeyi veritabanına yeniden ekle
-            for block, flat_no, floor, room_type in zip(block_names, flat_nos, floors, room_types):
-                # Sadece dolu satırların kaydedildiğinden emin ol
-                if block and flat_no and floor and room_type:
-                    cur.execute("""
-                        INSERT INTO flats (project_id, block_name, flat_no, floor, room_type)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (project_id, block.strip(), flat_no, floor, room_type.strip()))
-            
+            # Formdan gelen tüm daire verilerini listeler halinde al
+            flat_ids = request.form.getlist('flat_id[]')
+            block_names = request.form.getlist('block_name[]')
+            flat_nos = request.form.getlist('flat_no[]')
+            floors = request.form.getlist('floor[]')
+            room_types = request.form.getlist('room_type[]')
+
+            # Veritabanındaki mevcut daire ID'lerini al (sadece sahibi olmayanları sileceğiz)
+            cur.execute("SELECT id FROM flats WHERE project_id = %s AND owner_id IS NULL", (project_id,))
+            deletable_ids_in_db = {row[0] for row in cur.fetchall()}
+
+            submitted_ids = set()
+
+            for i in range(len(block_names)):
+                # Sadece dolu satırları işle
+                if block_names[i] and flat_nos[i] and floors[i] and room_types[i]:
+                    flat_id = flat_ids[i]
+                    
+                    if flat_id and flat_id != 'new': # Mevcut bir daire ise GÜNCELLE
+                        flat_id = int(flat_id)
+                        submitted_ids.add(flat_id)
+                        cur.execute("""
+                            UPDATE flats SET block_name=%s, flat_no=%s, floor=%s, room_type=%s
+                            WHERE id=%s
+                        """, (block_names[i], flat_nos[i], floors[i], room_types[i], flat_id))
+                    
+                    elif flat_id == 'new': # Yeni bir daire ise EKLE
+                        cur.execute("""
+                            INSERT INTO flats (project_id, block_name, flat_no, floor, room_type)
+                            VALUES (%s, %s, %s, %s, %s)
+                        """, (project_id, block_names[i], flat_nos[i], floors[i], room_types[i]))
+
+            # Formdan silinmiş olan (ama veritabanında olan) boş daireleri SİL
+            ids_to_delete = deletable_ids_in_db - submitted_ids
+            if ids_to_delete:
+                # %s'nin tuple olarak formatlanması için (id,) şeklinde kullanıyoruz
+                for single_id in ids_to_delete:
+                    cur.execute("DELETE FROM flats WHERE id = %s", (single_id,))
+
             conn.commit()
             flash('Daire listesi başarıyla güncellendi.', 'success')
             return redirect(url_for('assign_flat_owner'))
@@ -166,22 +258,18 @@ def add_flats(project_id):
         except Exception as e:
             conn.rollback()
             flash(f'Daireler güncellenirken bir hata oluştu: {e}', 'danger')
-            return redirect(url_for('add_flats', project_id=project_id))
         finally:
             cur.close()
             conn.close()
+        return redirect(url_for('manage_flats', project_id=project_id))
 
-    # GET isteği için: Proje adını ve mevcut daireleri çek
+    # GET isteği için
     try:
         cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
-        project = cur.fetchone()
-        if not project:
-            flash('Proje bulunamadı.', 'danger')
-            return redirect(url_for('dashboard'))
-        project_name = project[0]
+        project_name = cur.fetchone()[0]
         
-        # Mevcut daireleri forma doldurmak için çek
-        cur.execute("SELECT block_name, flat_no, floor, room_type FROM flats WHERE project_id = %s ORDER BY block_name, floor, flat_no", (project_id,))
+        # Mevcut daireleri ve sahip durumlarını çek
+        cur.execute("SELECT id, block_name, flat_no, floor, room_type, owner_id FROM flats WHERE project_id = %s ORDER BY block_name, floor, flat_no", (project_id,))
         existing_flats = cur.fetchall()
         
     except Exception as e:
@@ -192,7 +280,7 @@ def add_flats(project_id):
         cur.close()
         conn.close()
 
-    return render_template('project_flats.html', 
+    return render_template('manage_flats.html', 
                            project_id=project_id, 
                            project_name=project_name,
                            existing_flats=existing_flats)
@@ -316,22 +404,34 @@ def list_expenses():
 def select_project_for_expenses():
     return redirect(url_for('list_expenses'))
 
-# app.py dosyanızın en altına bu ÜÇ YENİ fonksiyonu ekleyin
+# app.py içine eklenecek/değiştirilecek fonksiyonlar
+
 def reconcile_expense_payments(cur, expense_id):
     """
     Bir gidere ait tüm taksitlerin ödenen tutarlarını,
-    gerçekleşen toplam ödemeye göre baştan hesaplar.
+    gerçekleşen ve durumu 'ödendi' olan toplam ödemeye göre baştan hesaplar.
+    Sadece nakit ödemeleri ve durumu 'odendi' olan çekleri hesaba katar.
     """
-    cur.execute("SELECT COALESCE(SUM(amount), 0) FROM supplier_payments WHERE expense_id = %s", (expense_id,))
+    # 1. Toplam ödenmiş tutarı HESAPLA (Sadece nakitler ve 'odendi' durumundaki çekler)
+    cur.execute("""
+        SELECT COALESCE(SUM(sp.amount), 0)
+        FROM supplier_payments sp
+        LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
+        WHERE sp.expense_id = %s AND (sp.payment_method = 'nakit' OR oc.status = 'odendi')
+    """, (expense_id,))
     total_paid = cur.fetchone()[0]
+
+    # 2. İlgili giderin tüm taksitlerini sıfırla
     cur.execute("UPDATE expense_schedule SET paid_amount = 0, is_paid = FALSE WHERE expense_id = %s", (expense_id,))
+    
+    # 3. Hesaplanan doğru tutarı taksitlere baştan dağıt
     amount_to_distribute = total_paid
     cur.execute("SELECT id, amount FROM expense_schedule WHERE expense_id = %s ORDER BY due_date ASC", (expense_id,))
     installments = cur.fetchall()
     for inst_id, total_amount in installments:
         if amount_to_distribute <= 0: break
         payment_for_this_inst = min(amount_to_distribute, total_amount)
-        is_paid = (payment_for_this_inst == total_amount)
+        is_paid = (payment_for_this_inst >= total_amount)
         cur.execute("UPDATE expense_schedule SET paid_amount = %s, is_paid = %s WHERE id = %s", (payment_for_this_inst, is_paid, inst_id))
         amount_to_distribute -= payment_for_this_inst
 
@@ -342,45 +442,84 @@ def edit_supplier_payment(payment_id):
     
     conn = get_connection()
     cur = conn.cursor()
+    
+    # --- FORM GÖNDERİLDİĞİNDE (POST İSTEĞİ) ---
     if request.method == 'POST':
         try:
-            amount = Decimal(request.form.get('amount').replace('.', '').replace(',', '.'))
+            amount_str = request.form.get('amount').replace('.', '').replace(',', '.')
+            amount = Decimal(amount_str)
             payment_date = request.form.get('payment_date')
             description = request.form.get('description')
             
-            cur.execute("SELECT expense_id FROM supplier_payments WHERE id = %s", (payment_id,))
-            expense_id = cur.fetchone()[0]
+            cur.execute("SELECT expense_id, check_id FROM supplier_payments WHERE id = %s", (payment_id,))
+            result = cur.fetchone()
+            if not result:
+                raise ValueError("Güncellenecek ödeme kaydı bulunamadı.")
+            expense_id, check_id = result
+
             cur.execute("UPDATE supplier_payments SET amount=%s, payment_date=%s, description=%s WHERE id=%s",
                         (amount, payment_date, description, payment_id))
+
+            if check_id:
+                check_due_date = request.form.get('check_due_date')
+                cur.execute("UPDATE outgoing_checks SET amount = %s, issue_date = %s, due_date = %s WHERE id = %s",
+                            (amount, payment_date, check_due_date, check_id))
+
             reconcile_expense_payments(cur, expense_id)
+            
             conn.commit()
             flash('Gider ödemesi başarıyla güncellendi.', 'success')
             
             cur.execute("SELECT project_id FROM expenses WHERE id = %s", (expense_id,))
             project_id = cur.fetchone()[0]
             return redirect(url_for('list_expenses', project_id=project_id))
+
         except Exception as e:
             conn.rollback()
             flash(f'Güncelleme sırasında hata: {e}', 'danger')
         finally:
             cur.close()
             conn.close()
-        return redirect(request.url)
+        return redirect(url_for('edit_supplier_payment', payment_id=payment_id))
 
-    # GET
-    cur.execute("""
-        SELECT sp.amount, sp.payment_date, sp.description, e.title, p.name, e.project_id
-        FROM supplier_payments sp
-        JOIN expenses e ON sp.expense_id = e.id
-        JOIN projects p ON e.project_id = p.id
-        WHERE sp.id = %s
-    """, (payment_id,))
-    payment = cur.fetchone()
-    cur.close()
-    conn.close()
-    if not payment:
-        flash('Düzenlenecek ödeme bulunamadı.', 'danger')
+    # --- SAYFA İLK AÇILDIĞINDA (GET İSTEĞİ) ---
+    # DÜZELTME BURADA: Veritabanından gelen 'tuple' verisini bir 'dictionary' (sözlük) haline getiriyoruz.
+    try:
+        cur.execute("""
+            SELECT 
+                sp.amount, sp.payment_date, sp.description, e.title, p.name, e.project_id,
+                sp.check_id, oc.due_date as check_due_date
+            FROM supplier_payments sp
+            JOIN expenses e ON sp.expense_id = e.id
+            JOIN projects p ON e.project_id = p.id
+            LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
+            WHERE sp.id = %s
+        """, (payment_id,))
+        payment_raw = cur.fetchone() # Bu satır veriyi bir tuple (liste) olarak alır
+
+        if not payment_raw:
+            flash('Düzenlenecek ödeme bulunamadı.', 'danger')
+            return redirect(url_for('dashboard'))
+
+        # Aldığımız tuple'ı, HTML şablonunun anlayacağı bir sözlüğe dönüştürüyoruz
+        payment = {
+            'amount': payment_raw[0],
+            'payment_date': payment_raw[1],
+            'description': payment_raw[2],
+            'expense_title': payment_raw[3],
+            'project_name': payment_raw[4],
+            'project_id': payment_raw[5],
+            'is_check': payment_raw[6] is not None,
+            'check_due_date': payment_raw[7]
+        }
+
+    except Exception as e:
+        flash(f'Ödeme bilgileri alınırken hata oluştu: {e}', 'danger')
         return redirect(url_for('dashboard'))
+    finally:
+        cur.close()
+        conn.close()
+
     return render_template('edit_supplier_payment.html', payment=payment, payment_id=payment_id, user_name=session.get('user_name'))
 
 @app.route('/supplier_payment/<int:payment_id>/delete', methods=['POST'])
@@ -877,7 +1016,7 @@ def edit_project(project_id):
             conn.commit()
             
             flash('Proje başarıyla güncellendi. Şimdi daire bilgilerini gözden geçirebilirsiniz.', 'success')
-            return redirect(url_for('add_flats', project_id=project_id))
+            return redirect(url_for('manage_flats', project_id=project_id)) # YENİ YÖNLENDİRME
 
         except Exception as e:
             conn.rollback()
@@ -901,18 +1040,43 @@ def edit_project(project_id):
 
 @app.route('/project/<int:project_id>/delete', methods=['POST'])
 def delete_project(project_id):
-    """Bir projeyi ve ona bağlı tüm verileri siler."""
+    """Bir projeyi ve ona bağlı tüm verileri (ilişkili tüm çekler dahil) siler."""
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
     conn = get_connection()
     cur = conn.cursor()
     try:
-        # Veritabanındaki ON DELETE CASCADE ayarı sayesinde, bu projeye bağlı
-        # tüm daireler, giderler, taksit planları ve ödemeler otomatik olarak silinecektir.
+        # 1. Projeye bağlı GELİR çeklerini bul (payments -> checks)
+        cur.execute("""
+            SELECT p.check_id FROM payments p
+            JOIN flats f ON p.flat_id = f.id
+            WHERE f.project_id = %s AND p.check_id IS NOT NULL
+        """, (project_id,))
+        incoming_check_ids = [row[0] for row in cur.fetchall()]
+
+        # 2. Projeye bağlı GİDER çeklerini bul (expenses -> outgoing_checks)
+        cur.execute("""
+            SELECT e.outgoing_check_id FROM expenses e
+            WHERE e.project_id = %s AND e.outgoing_check_id IS NOT NULL
+        """, (project_id,))
+        outgoing_check_ids = [row[0] for row in cur.fetchall()]
+
+        # 3. Önce Projenin kendisini sil. Veritabanındaki `ON DELETE CASCADE` ayarı,
+        # projeye bağlı flats, payments, expenses, installment_schedule, expense_schedule gibi
+        # tüm alt kayıtları otomatik olarak silecektir.
         cur.execute("DELETE FROM projects WHERE id = %s", (project_id,))
+        
+        # 4. Artık güvende olan (ana kayıtları silinmiş) gelir çeklerini sil
+        if incoming_check_ids:
+            cur.execute("DELETE FROM checks WHERE id IN %s", (tuple(incoming_check_ids),))
+
+        # 5. Artık güvende olan gider çeklerini sil
+        if outgoing_check_ids:
+            cur.execute("DELETE FROM outgoing_checks WHERE id IN %s", (tuple(outgoing_check_ids),))
+        
         conn.commit()
-        flash('Proje ve ilgili tüm veriler başarıyla silindi.', 'success')
+        flash('Proje ve ilgili tüm veriler (çekler dahil) başarıyla silindi.', 'success')
     except Exception as e:
         conn.rollback()
         flash(f'Proje silinirken bir hata oluştu: {e}', 'danger')
@@ -921,7 +1085,6 @@ def delete_project(project_id):
         conn.close()
     
     return redirect(url_for('dashboard'))
-
 
 @app.route('/delete_flat_owner_data', methods=['POST'])
 def delete_flat_owner_data():
@@ -938,26 +1101,29 @@ def delete_flat_owner_data():
     cur = conn.cursor()
 
     try:
+        # 1. Daireye bağlı GELİR çeklerinin ID'lerini bul
+        cur.execute("SELECT check_id FROM payments WHERE flat_id = %s AND check_id IS NOT NULL", (flat_id,))
+        check_ids_to_delete = [row[0] for row in cur.fetchall()]
 
+        # 2. Dairenin ödeme planını (taksitlerini) sil
+        cur.execute("DELETE FROM installment_schedule WHERE flat_id = %s", (flat_id,))
+        
+        # 3. Dairenin ödeme kayıtlarını sil
+        cur.execute("DELETE FROM payments WHERE flat_id = %s", (flat_id,))
+
+        # 4. Bulunan çekleri `checks` tablosundan sil
+        if check_ids_to_delete:
+            cur.execute("DELETE FROM checks WHERE id IN %s", (tuple(check_ids_to_delete),))
+
+        # 5. Dairenin sahibini ve finansal bilgilerini sıfırla
         cur.execute("""
             UPDATE flats
             SET owner_id = NULL, total_price = NULL, total_installments = NULL
             WHERE id = %s
         """, (flat_id,))
         
-        cur.execute("""
-            DELETE FROM payments
-            WHERE flat_id = %s
-        """, (flat_id,))
-
-
-        cur.execute("""
-            DELETE FROM installment_schedule
-            WHERE flat_id = %s
-        """, (flat_id,))
-        
         conn.commit()
-        return jsonify({'success': True, 'message': 'Daire sahibi ve ilgili tüm finansal veriler başarıyla sıfırlandı.'})
+        return jsonify({'success': True, 'message': 'Daire sahibi ve ilgili tüm finansal veriler (çekler dahil) başarıyla sıfırlandı.'})
 
     except Exception as e:
         conn.rollback()
@@ -1357,6 +1523,111 @@ def project_transactions(project_id):
         user_name=session.get('user_name') # user_name'i şablona gönderdiğimizden emin olalım
     )
 
+@app.route('/project/<int:project_id>/overview')
+def project_overview(project_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cur = conn.cursor()
+    
+    # Filtreleme ve sıralama parametrelerini al
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    sort_by = request.args.get('sort_by', 'date') # Şimdilik sadece tarihe göre
+    order = request.args.get('order', 'desc')
+
+    income_items = []
+    expense_items = []
+    today = date.today()
+
+    try:
+        cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
+        project_name = cur.fetchone()[0]
+
+        # 1. Planlanmış Gelirleri Çek
+        cur.execute("""
+            SELECT 
+                s.due_date, s.amount, s.paid_amount, s.is_paid,
+                c.first_name, c.last_name, f.block_name, f.floor, f.flat_no
+            FROM installment_schedule s
+            JOIN flats f ON s.flat_id = f.id
+            JOIN customers c ON f.owner_id = c.id
+            WHERE f.project_id = %s
+        """, (project_id,))
+        for due_date, amount, paid_amount, is_paid, first, last, block, floor, flat_no in cur.fetchall():
+            status, status_class = "", ""
+            if is_paid: status, status_class = "Ödendi", "bg-success"
+            elif paid_amount > 0: status, status_class = "Kısmen Ödendi", "bg-warning text-dark"
+            elif due_date < today: status, status_class = "Gecikmiş", "bg-danger"
+            else: status, status_class = "Bekleniyor", "bg-secondary"
+            
+            income_items.append({
+                'date': due_date, 'type': 'income',
+                'description': f"Daire Satış Taksiti",
+                'party': f"{first} {last}",
+                'details': f"Blok: {block or 'N/A'}, Kat: {floor}, No: {flat_no}",
+                'amount': amount, 'status': status, 'status_class': status_class
+            })
+
+        # 2. Planlanmış Giderleri Çek
+        cur.execute("""
+            SELECT s.due_date, s.amount, s.paid_amount, s.is_paid, e.title, sup.name
+            FROM expense_schedule s
+            JOIN expenses e ON s.expense_id = e.id
+            JOIN suppliers sup ON e.supplier_id = sup.id
+            WHERE e.project_id = %s
+        """, (project_id,))
+        for due_date, amount, paid_amount, is_paid, title, sup_name in cur.fetchall():
+            status, status_class = "", ""
+            if is_paid: status, status_class = "Ödendi", "bg-success"
+            elif paid_amount > 0: status, status_class = "Kısmen Ödendi", "bg-warning text-dark"
+            elif due_date < today: status, status_class = "Gecikmiş", "bg-danger"
+            else: status, status_class = "Bekleniyor", "bg-secondary"
+
+            expense_items.append({
+                'date': due_date, 'type': 'expense', 'description': title,
+                'party': sup_name, 'details': 'Planlı Gider',
+                'amount': amount, 'status': status, 'status_class': status_class
+            })
+
+        # 3. Küçük Nakit Giderleri Çek
+        cur.execute("SELECT expense_date, title, amount, description FROM petty_cash_expenses WHERE project_id = %s", (project_id,))
+        for expense_date, title, amount, description in cur.fetchall():
+            expense_items.append({
+                'date': expense_date, 'type': 'petty_cash', 'description': title,
+                'party': 'Kasa' if not description else description, 'details': 'Küçük Gider',
+                'amount': amount, 'status': 'Ödendi', 'status_class': 'bg-success'
+            })
+
+        # Tarihe göre filtreleme
+        if start_date_str:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            income_items = [i for i in income_items if i['date'] >= start_date]
+            expense_items = [e for e in expense_items if e['date'] >= start_date]
+        if end_date_str:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+            income_items = [i for i in income_items if i['date'] <= end_date]
+            expense_items = [e for e in expense_items if e['date'] <= end_date]
+            
+        # Sıralama
+        is_descending = (order == 'desc')
+        income_items.sort(key=lambda x: x['date'], reverse=is_descending)
+        expense_items.sort(key=lambda x: x['date'], reverse=is_descending)
+
+    except Exception as e:
+        flash(f"Proje genel bakışı oluşturulurken bir hata oluştu: {e}", "danger")
+        project_name = "Bilinmiyor"
+    finally:
+        cur.close()
+        conn.close()
+    
+    return render_template('project_overview.html',
+                           project_id=project_id, project_name=project_name,
+                           income_items=income_items, expense_items=expense_items,
+                           start_date=start_date_str, end_date=end_date_str,
+                           sort_by=sort_by, order=order,
+                           user_name=session.get('user_name'))
 
 # list_expenses fonksiyonu
 
@@ -1637,7 +1908,7 @@ def manage_expense_plan(expense_id):
 
 @app.route('/expense/<int:expense_id>/delete', methods=['POST'])
 def delete_expense(expense_id):
-    """Belirli bir gideri veritabanından siler."""
+    """Belirli bir gideri ve varsa ilişkili çekini veritabanından siler."""
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
@@ -1646,9 +1917,20 @@ def delete_expense(expense_id):
     conn = get_connection()
     cur = conn.cursor()
     try:
+        # 1. Silmeden önce ilişkili GİDER çekinin ID'sini al
+        cur.execute("SELECT outgoing_check_id FROM expenses WHERE id = %s", (expense_id,))
+        result = cur.fetchone()
+        outgoing_check_id = result[0] if result else None
+
+        # 2. Gideri sil (Veritabanındaki ON DELETE CASCADE ayarı ilgili taksitleri vs. otomatik siler)
         cur.execute("DELETE FROM expenses WHERE id = %s", (expense_id,))
+
+        # 3. Eğer ilişkili bir çek varsa, onu da `outgoing_checks` tablosundan sil
+        if outgoing_check_id:
+            cur.execute("DELETE FROM outgoing_checks WHERE id = %s", (outgoing_check_id,))
+
         conn.commit()
-        flash('Gider başarıyla silindi.', 'success')
+        flash('Gider ve varsa ilgili çeki başarıyla silindi.', 'success')
     except Exception as e:
         conn.rollback()
         flash(f'Gider silinirken bir hata oluştu: {e}', 'danger')

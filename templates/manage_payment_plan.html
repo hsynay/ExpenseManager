@@ -24,7 +24,7 @@
                 </div>
             </div>
             <div class="card-body p-4">
-                <form method="POST" action="{{ url_for('manage_payment_plan', flat_id=flat_id) }}">
+                <form method="POST" action="{{ url_for('manage_payment_plan', flat_id=flat_id) }}" id="payment-plan-form">
                     <div id="installments-container">
                         <!-- Başlıklar -->
                         <div class="row mb-2 d-none d-md-flex">
@@ -40,7 +40,8 @@
                                 <input type="date" name="due_date[]" class="form-control" value="{{ installment[0].strftime('%Y-%m-%d') }}" {% if installment[2] %}readonly{% endif %} required>
                             </div>
                             <div class="col-md-5">
-                                <input type="text" step="0.01" name="amount[]" class="form-control thousands-input" value="{{ installment[1] }}" {% if installment[2] %}readonly{% endif %} required>
+                                <!-- gösterim için binlik ayraçlı, submit öncesi JS ile normalize edilecek -->
+                                <input type="text" step="0.01" name="amount[]" class="form-control thousands-input" value="{{ installment[1]|thousands }}" {% if installment[2] %}readonly{% endif %} required>
                             </div>
                             <div class="col-md-2">
                                 {% if installment[2] %}
@@ -74,6 +75,60 @@
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         const container = document.getElementById('installments-container');
+        const form = document.getElementById('payment-plan-form');
+
+        // Format: 1234567.89 -> "1.234.567,89"
+        function formatThousandsDisplay(value) {
+            if (value === null || value === undefined || value === '') return '';
+            // ensure string
+            let s = String(value).trim();
+            // normalize possible decimal comma or dot to dot for processing
+            s = s.replace(/\s/g, '').replace(',', '.');
+            if (isNaN(s)) return value;
+            let parts = s.split('.');
+            let intPart = parts[0];
+            let fracPart = parts[1] || '';
+            // add leading negative sign if any
+            const sign = intPart.startsWith('-') ? '-' : '';
+            if (sign) intPart = intPart.slice(1);
+            intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            if (fracPart.length > 0) {
+                // trim trailing zeros
+                fracPart = fracPart.replace(/0+$/, '');
+                return sign + intPart + (fracPart ? ',' + fracPart : '');
+            }
+            return sign + intPart;
+        }
+
+        // Parse display format to en numeric string: "1.234.567,89" -> "1234567.89"
+        function parseToPlainNumber(displayValue) {
+            if (!displayValue && displayValue !== 0) return '';
+            let s = String(displayValue).trim();
+            if (s === '') return '';
+            // remove dots (thousands), replace comma with dot for decimal
+            s = s.replace(/\./g, '').replace(',', '.');
+            return s;
+        }
+
+        // Apply display formatting to an input element (keeps editable)
+        function applyDisplayFormat(input) {
+            const cursorPos = input.selectionStart;
+            const oldLen = input.value.length;
+            const plain = parseToPlainNumber(input.value);
+            input.value = formatThousandsDisplay(plain);
+            // try to restore caret roughly
+            const newLen = input.value.length;
+            const newPos = Math.max(0, cursorPos + (newLen - oldLen));
+            input.setSelectionRange(newPos, newPos);
+        }
+
+        // Initialize formatting for existing inputs
+        function initExistingInputs() {
+            document.querySelectorAll('.thousands-input').forEach(function(inp) {
+                // format initial raw value if needed (already formatted by Jinja, but safe)
+                inp.value = formatThousandsDisplay(parseToPlainNumber(inp.value));
+            });
+        }
 
         // Yeni satır ekleme
         document.getElementById('add-row-btn').addEventListener('click', function() {
@@ -99,6 +154,37 @@
                 e.target.closest('.installment-row').remove();
             }
         });
+
+        // Input event delegation for formatting
+        container.addEventListener('input', function(e) {
+            const inp = e.target.closest('.thousands-input') ? e.target.closest('.thousands-input') : null;
+            if (inp) {
+                // we format on blur for better UX, but also normalize simple typing here:
+                // allow digits, dot, comma, hyphen; remove other chars
+                inp.value = inp.value.replace(/[^0-9\.,\-]/g, '');
+            }
+        });
+
+        // On blur apply display format
+        container.addEventListener('blur', function(e) {
+            const inp = e.target.closest('.thousands-input') ? e.target.closest('.thousands-input') : null;
+            if (inp) {
+                applyDisplayFormat(inp);
+            }
+        }, true);
+
+        // Form submit: normalize all amount inputs to plain numeric string acceptable by server (dot decimal)
+        form.addEventListener('submit', function(ev) {
+            document.querySelectorAll('.thousands-input').forEach(function(inp) {
+                // if readonly (paid) keep as is but normalize anyway
+                const plain = parseToPlainNumber(inp.value);
+                // set to plain format with dot for decimal and no thousands
+                inp.value = plain;
+            });
+        });
+
+        // initialize on load
+        initExistingInputs();
     });
 </script>
 {% endblock %}
