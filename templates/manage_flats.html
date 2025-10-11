@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Daireleri Yönet{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="fw-bold mb-0"><i class="fa-solid fa-building-user me-2"></i>"{{ project_name }}" Projesi Daire Yönetimi</h4>
+            </div>
+            <div class="card-body p-4">
+                <form method="POST">
+                    <div id="flats-container">
+                        <div class="row mb-2 d-none d-md-flex fw-bold">
+                            <div class="col-md-3"><label class="form-label">Blok Adı</label></div>
+                            <div class="col-md-2"><label class="form-label">Daire No</label></div>
+                            <div class="col-md-2"><label class="form-label">Kat</label></div>
+                            <div class="col-md-3"><label class="form-label">Oda Tipi</label></div>
+                            <div class="col-md-2"></div>
+                        </div>
+
+                        {% for flat in existing_flats %}
+                        <div class="row g-2 mb-2 align-items-center flat-row">
+                            <input type="hidden" name="flat_id[]" value="{{ flat[0] }}">
+                            <div class="col-md-3"><input type="text" name="block_name[]" class="form-control" value="{{ flat[1] }}" {% if flat[5] %}readonly{% endif %} required></div>
+                            <div class="col-md-2"><input type="number" name="flat_no[]" class="form-control" value="{{ flat[2] }}" {% if flat[5] %}readonly{% endif %} required></div>
+                            <div class="col-md-2"><input type="number" name="floor[]" class="form-control" value="{{ flat[3] }}" {% if flat[5] %}readonly{% endif %} required></div>
+                            <div class="col-md-3"><input type="text" name="room_type[]" class="form-control" value="{{ flat[4] }}" {% if flat[5] %}readonly{% endif %} placeholder="Örn: 3+1" required></div>
+                            <div class="col-md-2">
+                                {% if flat[5] %}
+                                    <span class="badge bg-success w-100 p-2" title="Bu daire satıldığı için silinemez veya düzenlenemez."><i class="fa-solid fa-lock me-1"></i> SATILDI</span>
+                                {% else %}
+                                    <button type="button" class="btn btn-danger w-100 remove-row"><i class="fa-solid fa-trash-alt"></i> Sil</button>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <hr>
+
+                    <div class="d-flex justify-content-between">
+                        <button type="button" id="add-row-btn" class="btn btn-success">
+                            <i class="fa-solid fa-plus me-1"></i> Yeni Daire Ekle
+                        </button>
+                        <div>
+                            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">İptal</a>
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="fa-solid fa-save me-2"></i> Daire Listesini Güncelle
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const container = document.getElementById('flats-container');
+        
+        document.getElementById('add-row-btn').addEventListener('click', function() {
+            const newRow = document.createElement('div');
+            newRow.classList.add('row', 'g-2', 'mb-2', 'align-items-center', 'flat-row');
+            // Yeni eklenen satırların ID'si "new" olarak işaretlenir.
+            newRow.innerHTML = `
+                <input type="hidden" name="flat_id[]" value="new">
+                <div class="col-md-3"><input type="text" name="block_name[]" class="form-control" placeholder="Blok Adı" required></div>
+                <div class="col-md-2"><input type="number" name="flat_no[]" class="form-control" placeholder="No" required></div>
+                <div class="col-md-2"><input type="number" name="floor[]" class="form-control" placeholder="Kat" required></div>
+                <div class="col-md-3"><input type="text" name="room_type[]" class="form-control" placeholder="Oda Tipi (örn: 3+1)" required></div>
+                <div class="col-md-2"><button type="button" class="btn btn-danger w-100 remove-row"><i class="fa-solid fa-trash-alt"></i> Sil</button></div>
+            `;
+            container.appendChild(newRow);
+        });
+
+        container.addEventListener('click', function(e) {
+            if (e.target && e.target.closest('.remove-row')) {
+                e.target.closest('.flat-row').remove();
+            }
+        });
+    });
+</script>
+{% endblock %}

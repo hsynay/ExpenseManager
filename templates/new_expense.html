@@ -63,10 +63,10 @@
     </div>
 </div>
 {% endblock %}
-
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // ... (sayfanızdaki mevcut diğer scriptler aynı kalacak) ...
         // Tedarikçi alanlarını yönet
         const existingSupplierRadio = document.getElementById('existingSupplierRadio');
         const newSupplierRadio = document.getElementById('newSupplierRadio');
@@ -95,8 +95,6 @@
             singleExpenseFields.style.display = isSingle ? 'block' : 'none';
             plannedExpenseFields.style.display = isSingle ? 'none' : 'block';
             singleExpenseFields.querySelector('input').required = isSingle;
-            // Taksitli seçildiğinde, içindeki inputlar required olsun
-            plannedExpenseFields.querySelectorAll('input').forEach(input => input.required = !isSingle);
         }
         singleExpenseRadio.addEventListener('change', toggleExpenseFields);
         plannedExpenseRadio.addEventListener('change', toggleExpenseFields);
@@ -109,11 +107,20 @@
             newRow.classList.add('row', 'g-2', 'mb-2', 'align-items-center', 'installment-row');
             newRow.innerHTML = `
                 <div class="col-sm-6"><input type="date" name="installment_due_date[]" class="form-control" required></div>
-                <div class="col-sm-5"><input type="text" step="0.01" name="installment_amount[]" class="form-control thousands-input" placeholder="Tutar" required></div>
+                <div class="col-sm-5"><input type="text" name="installment_amount[]" class="form-control thousands-input" placeholder="Tutar" required></div>
                 <div class="col-sm-1"><button type="button" class="btn btn-sm btn-danger w-100 remove-row"><i class="fa-solid fa-trash-alt"></i></button></div>
             `;
             container.appendChild(newRow);
+
+            // YENİ EKLENEN KISIM:
+            // Yeni oluşturulan satırdaki '.thousands-input' kutucuğunu bul.
+            const newThousandsInput = newRow.querySelector('.thousands-input');
+            // Eğer varsa ve global fonksiyonumuz mevcutsa, formatlamayı bu yeni kutucuk için de başlat.
+            if (newThousandsInput && typeof window.initThousandsInput === 'function') {
+                window.initThousandsInput(newThousandsInput);
+            }
         });
+
         container.addEventListener('click', function(e) {
             if (e.target.closest('.remove-row')) {
                 e.target.closest('.installment-row').remove();

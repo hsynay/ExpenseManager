@@ -1,37 +1,48 @@
 {% extends "base.html" %}
 
-{% block title %}Gider Ödemesi Düzenle{% endblock %}
+{% block title %}Gider Ödemesini Düzenle{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
-    <div class="col-lg-7">
+    <div class="col-lg-8">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="fw-bold"><i class="fa-solid fa-edit me-2 text-warning"></i>Gider Ödemesini Düzenle</h2>
+            <a href="{{ url_for('list_expenses', project_id=payment.project_id) }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Gider Listesine Dön</a>
+        </div>
+
         <div class="card">
             <div class="card-header">
-                <h4 class="fw-bold mb-0"><i class="fa-solid fa-edit me-2"></i>Gider Ödemesi Düzenle</h4>
+                <strong>Proje:</strong> {{ payment.project_name }} | <strong>Gider:</strong> {{ payment.expense_title }}
             </div>
             <div class="card-body p-4">
-                <div class="alert alert-secondary">
-                    <strong>Proje:</strong> {{ payment[4] }}<br>
-                    <strong>Gider Başlığı:</strong> {{ payment[3] }}
-                </div>
+                <form method="POST">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="amount" class="form-label fw-semibold">Ödeme Tutarı (₺) (*)</label>
+                            <input type="text" class="form-control thousands-input" id="amount" name="amount" value="{{ payment.amount }}" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="payment_date" class="form-label fw-semibold">İşlem Tarihi (*)</label>
+                            <input type="date" class="form-control" id="payment_date" name="payment_date" value="{{ payment.payment_date.strftime('%Y-%m-%d') }}" required>
+                        </div>
+                    </div>
 
-                <form method="POST" action="{{ url_for('edit_supplier_payment', payment_id=payment_id) }}">
+                    {# Eğer bu bir çek ödemesi ise, vade tarihini göster ve düzenlemeye izin ver #}
+                    {% if payment.is_check %}
                     <div class="mb-3">
-                        <label for="amount" class="form-label fw-semibold">Ödenen Tutar (*)</label>
-                        <input type="text" class="form-control thousands-input" id="amount" name="amount" value="{{ payment[0] }}" required>
+                        <label for="check_due_date" class="form-label fw-semibold">Çek Vade Tarihi (*)</label>
+                        <input type="date" class="form-control" id="check_due_date" name="check_due_date" value="{{ payment.check_due_date.strftime('%Y-%m-%d') if payment.check_due_date else '' }}" required>
                     </div>
-                    <div class="mb-3">
-                        <label for="payment_date" class="form-label fw-semibold">İşlem Tarihi (*)</label>
-                        <input type="date" class="form-control" id="payment_date" name="payment_date" value="{{ payment[1].isoformat() if payment[1] else '' }}" required>
-                    </div>
-                    <div class="mb-3">
+                    {% endif %}
+
+                    <div class="mb-4">
                         <label for="description" class="form-label fw-semibold">Açıklama</label>
-                        <textarea class="form-control" id="description" name="description" rows="2">{{ payment[2] or '' }}</textarea>
+                        <textarea class="form-control" name="description" id="description" rows="3">{{ payment.description }}</textarea>
                     </div>
 
-                    <div class="d-flex justify-content-end mt-4">
-                        <a href="{{ url_for('list_expenses', project_id=payment[5]) }}" class="btn btn-secondary me-2">İptal</a>
-                        <button type="submit" class="btn btn-success">Değişiklikleri Kaydet</button>
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                        <a href="{{ url_for('list_expenses', project_id=payment.project_id) }}" class="btn btn-secondary px-4"><i class="fa-solid fa-times me-2"></i>İptal</a>
+                        <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-save me-2"></i>Değişiklikleri Kaydet</button>
                     </div>
                 </form>
             </div>
