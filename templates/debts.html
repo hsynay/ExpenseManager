@@ -83,6 +83,7 @@
         </div>
     </div>
 </nav>
+
 <div class="container my-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="fw-bold"><i class="fa-solid fa-file-invoice-dollar me-2 text-primary"></i> Borç Defteri (Proje Bazlı)</h2>
@@ -108,6 +109,25 @@
             <div class="card-header bg-dark text-white">
                 <h4 class="mb-0"><i class="fa-solid fa-building me-2"></i>Proje: {{ project.project_name }} <span class="badge bg-secondary">{{ project.project_type }}</span></h4>
             </div>
+
+            {% if project.project_type == 'normal' %}
+            <div class="card-body border-bottom text-center p-3">
+                <div class="row">
+                    <div class="col-4 border-end">
+                        <h6 class="text-muted mb-1">PROJE TOPLAM GELİRİ</h6>
+                        <h4 class="fw-bold text-primary mb-0">{{ project.total_project_income|thousands }} ₺</h4>
+                    </div>
+                    <div class="col-4 border-end">
+                        <h6 class="text-muted mb-1">TAHSİL EDİLEN GELİR</h6>
+                        <h4 class="fw-bold text-success mb-0">{{ project.total_project_paid|thousands }} ₺</h4>
+                    </div>
+                    <div class="col-4">
+                        <h6 class="text-muted mb-1">KALAN ALACAK</h6>
+                        <h4 class="fw-bold text-danger mb-0">{{ project.total_project_remaining|thousands }} ₺</h4>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
             <div class="card-body p-lg-4">
                 {% for flat in project.flats %}
                     {% if project.project_type == 'normal' %}
@@ -161,7 +181,6 @@
                                             </tr>
                                         </thead>
                                             <tbody>
-                                                {# DÜZELTME: Döngüdeki değişken sayısı 6'ya çıkarıldı (p_flat_id eklendi) #}
                                                 {% for p_id, p_flat_id, p_date, p_desc, p_amount, p_method in flat.payments %}
                                                 <tr class="{% if p_method == 'çek' %}table-info{% endif %}">
                                                     <td>{{ p_date.strftime('%d.%m.%Y') }}</td>

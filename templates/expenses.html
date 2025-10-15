@@ -71,7 +71,16 @@
                     <tr><td colspan="4" class="text-center text-muted p-3">Küçük gider kaydı yok.</td></tr>
                     {% endfor %}
                 </tbody>
-            </table>
+                {% if petty_cash_items %}
+                <tfoot class="table-group-divider">
+                    <tr class="fw-bold">
+                        <td colspan="2" class="text-end">Toplam Küçük Gider:</td>
+                        <td class="text-end">{{ total_petty_cash_expense|thousands }} ₺</td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+                </table>
         </div>
     </div>
 

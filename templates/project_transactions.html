@@ -2,6 +2,12 @@
 
 {% block title %}{{ project_name }} - Kasa Defteri{% endblock %}
 
+{% block extra_head %}
+<style>
+    .summary-card h6 { font-size: 0.8rem; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
@@ -15,14 +21,35 @@
     </div>
 </div>
 
+<!-- === YENİ VE DOĞRU ÖZET KARTI === -->
+<div class="card summary-card mb-4">
+    <div class="card-body text-center p-3">
+        <div class="row">
+            <div class="col-md-4 border-end">
+                <h6 class="text-muted mb-1">GERÇEKLEŞEN TOPLAM GELİR</h6>
+                <h4 class="fw-bold text-success mb-0">{{ total_realized_income|thousands }} ₺</h4>
+            </div>
+            <div class="col-md-4 border-end">
+                <h6 class="text-muted mb-1">GERÇEKLEŞEN TOPLAM GİDER</h6>
+                <h4 class="fw-bold text-danger mb-0">{{ total_realized_expense|thousands }} ₺</h4>
+            </div>
+            <div class="col-md-4">
+                <h6 class="text-muted mb-1">NET NAKİT DURUMU (KASA)</h6>
+                <h4 class="fw-bold {{ 'text-success' if net_cash_flow >= 0 else 'text-danger' }} mb-0">{{ net_cash_flow|thousands }} ₺</h4>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- === ÖZET KARTI SONU === -->
+
 <form method="get" class="mb-4">
     <div class="row g-2 align-items-center">
         <div class="col-md-4">
             <label class="form-label fw-bold mb-1">Görüntüle:</label>
             <select name="view" class="form-select" onchange="this.form.submit()">
                 <option value="all" {% if view_type == 'all' %}selected{% endif %}>Tümü (Gerçekleşen Gelir ve Giderler)</option>
-                <option value="income" {% if view_type == 'income' %}selected{% endif %}>Sadece Gelirler</option>
-                <option value="expense" {% if view_type == 'expense' %}selected{% endif %}>Sadece Giderler</option>
+                <option value="income" {% if view_type == 'income' %}selected{% endif %}>Sadece Gerçekleşen Gelirler</option>
+                <option value="expense" {% if view_type == 'expense' %}selected{% endif %}>Sadece Gerçekleşen Giderler</option>
             </select>
         </div>
     </div>
@@ -62,7 +89,7 @@
                     <td class="text-end text-success fw-bold">{{ amount|thousands }} ₺</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="6" class="text-center text-muted p-3">Bu projeye ait gelir kaydı yok.</td></tr>
+                <tr><td colspan="6" class="text-center text-muted p-3">Bu projeye ait gerçekleşmiş gelir kaydı yok.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -108,7 +135,7 @@
                     <td class="text-end text-danger fw-bold">{{ amount|thousands }} ₺</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="5" class="text-center text-muted p-3">Bu projeye ait gider kaydı yok.</td></tr>
+                <tr><td colspan="5" class="text-center text-muted p-3">Bu projeye ait gerçekleşmiş gider kaydı yok.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
