@@ -81,15 +81,41 @@
         </h5>
     </div>
     <div class="card-body table-responsive p-0">
-        <table class="table table-striped table-hover table-sm mb-0">
+        <!-- Verilen tabloya id ekleniyor: income-table -->
+        <table id="income-table" class="table table-striped table-hover table-sm mb-0">
             <thead>
                 <tr>
                     <th><a class="text-dark" href="{{ url_for('project_overview', project_id=project_id, sort_by='date', order='asc' if order == 'desc' else 'desc', start_date=start_date, end_date=end_date) }}">Tarih {% if sort_by == 'date' %}<i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }}"></i>{% endif %}</a></th>
-                    <th>Kimden</th>
-                    <th>Daire</th>
+                    <!-- "Kimden" bağlantısına id ve mevcut order bilgisini taşıyan dataset ekleniyor; ikon gösterimi de eklendi -->
+                    <th>
+                        <a id="sort-party-link" class="text-dark" data-order="{{ order|default('asc') }}" href="{{ url_for('project_overview', project_id=project_id, sort_by='party', order='asc' if order == 'desc' else 'desc', start_date=start_date, end_date=end_date) }}">
+                            Kimden
+                            {% if sort_by == 'party' %}
+                                <i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }}" id="sort-party-icon"></i>
+                            {% else %}
+                                <i class="fa-solid fa-sort" id="sort-party-icon"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <!-- Daire sütunu: tıklanabilir -->
+                    <th>
+                        <a id="sort-flat-link" class="text-dark" data-order="asc" href="#">
+                            Daire <i class="fa-solid fa-sort" id="sort-flat-icon"></i>
+                        </a>
+                    </th>
                     <th>Açıklama</th>
-                    <th class="text-center">Durum</th>
-                    <th class="text-end">Tutar</th>
+                    <!-- Durum sütunu: tıklanabilir -->
+                    <th class="text-center">
+                        <a id="sort-status-link" class="text-dark" data-order="asc" href="#">
+                            Durum <i class="fa-solid fa-sort" id="sort-status-icon"></i>
+                        </a>
+                    </th>
+                    <!-- Tutar sütunu: tıklanabilir, sayı olarak parse edilecek -->
+                    <th class="text-end">
+                        <a id="sort-amount-link" class="text-dark" data-order="asc" href="#">
+                            Tutar <i class="fa-solid fa-sort" id="sort-amount-icon"></i>
+                        </a>
+                    </th>
                 </tr>
             </thead>
             <tbody>
@@ -115,33 +141,120 @@
         <h5 class="mb-0"><i class="fa-solid fa-arrow-up me-2"></i>Planlanmış ve Nakit Giderler (Firma Borçları)</h5>
     </div>
     <div class="card-body table-responsive p-0">
-        <table class="table table-striped table-hover table-sm mb-0">
-            <thead>
-                <tr>
-                    <th><a class="text-dark" href="{{ url_for('project_overview', project_id=project_id, sort_by='date', order='asc' if order == 'desc' else 'desc', start_date=start_date, end_date=end_date) }}">Tarih {% if sort_by == 'date' %}<i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }}"></i>{% endif %}</a></th>
-                    <th>Açıklama</th>
-                    <th>Kime / Nereye</th>
-                    <th class="text-center">Durum</th>
-                    <th class="text-end">Tutar</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in expense_items %}
-                <tr>
-                    <td>{{ item.date.strftime('%d.%m.%Y') }}</td>
-                    <td>
-                        <div>{{ item.description }}</div>
-                        <div class="text-muted small">{{ item.details }}</div>
-                    </td>
-                    <td>{{ item.party }}</td>
-                    <td class="text-center"><span class="badge {{ item.status_class }}">{{ item.status }}</span></td>
-                    <td class="text-end text-danger fw-bold">{{ item.amount|thousands }} ₺</td>
-                </tr>
-                {% else %}
-                <tr><td colspan="5" class="text-center text-muted p-3">Bu projeye ait gider kaydı yok.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
-{% endblock %}
+        <table id="expense-table" class="table table-striped table-hover table-sm mb-0">
+             <thead>
+                 <tr>
+                     <th><a class="text-dark" href="{{ url_for('project_overview', project_id=project_id, sort_by='date', order='asc' if order == 'desc' else 'desc', start_date=start_date, end_date=end_date) }}">Tarih {% if sort_by == 'date' %}<i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }}"></i>{% endif %}</a></th>
+                     <th>Açıklama</th>
+                     <th>Kime / Nereye</th>
+                     <th class="text-center">
+                        <a id="sort-expense-status" class="text-dark" data-order="asc" href="#">
+                            Durum <i class="fa-solid fa-sort" id="sort-expense-status-icon"></i>
+                        </a>
+                    </th>
+                    <th class="text-end">
+                        <a id="sort-expense-amount" class="text-dark" data-order="asc" href="#">
+                            Tutar <i class="fa-solid fa-sort" id="sort-expense-amount-icon"></i>
+                        </a>
+                    </th>
+                 </tr>
+             </thead>
+             <tbody>
+                 {% for item in expense_items %}
+                 <tr>
+                     <td>{{ item.date.strftime('%d.%m.%Y') }}</td>
+                     <td>
+                         <div>{{ item.description }}</div>
+                         <div class="text-muted small">{{ item.details }}</div>
+                     </td>
+                     <td>{{ item.party }}</td>
+                     <td class="text-center"><span class="badge {{ item.status_class }}">{{ item.status }}</span></td>
+                     <td class="text-end text-danger fw-bold">{{ item.amount|thousands }} ₺</td>
+                 </tr>
+                 {% else %}
+                 <tr><td colspan="5" class="text-center text-muted p-3">Bu projeye ait gider kaydı yok.</td></tr>
+                 {% endfor %}
+             </tbody>
+         </table>
+     </div>
+ </div>
+ 
+ <!-- JavaScript: gelişmiş istemci tarafı sıralama (metin, tarih, sayı) -->
+ <script>
+ document.addEventListener('DOMContentLoaded', function () {
+     // Yardımcı: dd.mm.yyyy -> Date
+     function parseDateDMY(text) {
+         var parts = (text || '').trim().split('.');
+         if (parts.length !== 3) return new Date(0);
+         var d = parseInt(parts[0], 10), m = parseInt(parts[1], 10) - 1, y = parseInt(parts[2], 10);
+         return new Date(y, m, d);
+     }
+
+     // Yardımcı: para metnini sayıya çevir (ör: "1.234.567 ₺" -> 1234567)
+     function parseAmount(text) {
+         var s = (text || '').trim();
+         // remove currency and spaces
+         s = s.replace(/[^\d\.,\-]/g, '');
+         // if more than one dot and comma present, assume dots are thousands separators
+         // standard approach: remove dots, replace comma with dot
+         s = s.replace(/\./g, '').replace(/,/g, '.');
+         var n = parseFloat(s);
+         return isNaN(n) ? 0 : n;
+     }
+
+     // Genel attach fonksiyonu: tableId, linkId, colIndex, type ('text'|'date'|'number')
+     function attachSort(linkId, tableId, colIndex, type) {
+         var link = document.getElementById(linkId);
+         var table = document.getElementById(tableId);
+         if (!link || !table) return;
+         var icon = link.querySelector('i');
+         link.style.cursor = 'pointer';
+         link.addEventListener('click', function (e) {
+             e.preventDefault();
+             var tbody = table.tBodies[0];
+             if (!tbody) return;
+             var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+             var currentOrder = (link.dataset.order || 'asc').toLowerCase();
+             var newOrder = currentOrder === 'asc' ? 'desc' : 'asc';
+
+             rows.sort(function (a, b) {
+                 var aCell = a.cells[colIndex] ? a.cells[colIndex].textContent.trim() : '';
+                 var bCell = b.cells[colIndex] ? b.cells[colIndex].textContent.trim() : '';
+                 var cmp = 0;
+                 if (type === 'date') {
+                     cmp = parseDateDMY(aCell) - parseDateDMY(bCell);
+                 } else if (type === 'number') {
+                     cmp = parseAmount(aCell) - parseAmount(bCell);
+                 } else { // 'text'
+                     cmp = aCell.localeCompare(bCell, 'tr');
+                 }
+                 return newOrder === 'asc' ? cmp : -cmp;
+             });
+
+             rows.forEach(function (r) { tbody.appendChild(r); });
+             link.dataset.order = newOrder;
+             if (icon) {
+                 icon.className = newOrder === 'asc' ? 'fa-solid fa-sort-up' : 'fa-solid fa-sort-down';
+             }
+         });
+     }
+
+     // Mevcut "Kimden" sıralaması için dataset'teki başlangıç yönünü koru
+     // party column index = 1
+     attachSort('sort-party-link', 'income-table', 1, 'text');
+
+     // Daire (details) sütunu index = 2 (text)
+     attachSort('sort-flat-link', 'income-table', 2, 'text');
+
+     // Durum sütunu index = 4 (text, badge içeriği textContent ile alınır)
+     attachSort('sort-status-link', 'income-table', 4, 'text');
+
+     // Tutar sütunu index = 5 (number)
+     attachSort('sort-amount-link', 'income-table', 5, 'number');
+
+     // Expense table: Durum (col index 3, text), Tutar (col index 4, number)
+     attachSort('sort-expense-status', 'expense-table', 3, 'text');
+     attachSort('sort-expense-amount', 'expense-table', 4, 'number');
+ });
+ </script>
+ {% endblock %}

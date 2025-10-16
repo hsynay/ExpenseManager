@@ -61,15 +61,40 @@
         <h5 class="mb-0"><i class="fa-solid fa-arrow-down me-2"></i>Gerçekleşen Gelirler</h5>
     </div>
     <div class="card-body table-responsive p-0">
-        <table class="table table-striped table-hover table-sm mb-0">
+        <!-- id eklendi: income-realized-table -->
+        <table id="income-realized-table" class="table table-striped table-hover table-sm mb-0">
             <thead>
                 <tr>
-                    <th>Tarih</th>
-                    <th>Kimden</th>
-                    <th>Daire</th>
+                    <!-- Tarih başlığı tıklanabilir, ikon ve dataset.order eklendi -->
+                    <th>
+                        <a id="income-sort-date" class="text-dark" data-order="asc" href="#">
+                            Tarih <i class="fa-solid fa-sort" id="income-sort-date-icon"></i>
+                        </a>
+                    </th>
+                    <!-- Kimden başlığı tıklanabilir -->
+                    <th>
+                        <a id="income-sort-party" class="text-dark" data-order="asc" href="#">
+                            Kimden <i class="fa-solid fa-sort" id="income-sort-party-icon"></i>
+                        </a>
+                    </th>
+                    <!-- Daire artık tıklanabilir -->
+                    <th>
+                        <a id="income-sort-flat" class="text-dark" data-order="asc" href="#">
+                            Daire <i class="fa-solid fa-sort" id="income-sort-flat-icon"></i>
+                        </a>
+                    </th>
                     <th>Açıklama</th>
-                    <th>Yöntem</th>
-                    <th class="text-end">Tutar</th>
+                    <!-- Yöntem artık tıklanabilir -->
+                    <th>
+                        <a id="income-sort-method" class="text-dark" data-order="asc" href="#">
+                            Yöntem <i class="fa-solid fa-sort" id="income-sort-method-icon"></i>
+                        </a>
+                    </th>
+                    <th class="text-end">
+                        <a id="income-sort-amount" class="text-dark" data-order="asc" href="#">
+                            Tutar <i class="fa-solid fa-sort" id="income-sort-amount-icon"></i>
+                        </a>
+                    </th>
                 </tr>
             </thead>
             <tbody>
@@ -103,14 +128,34 @@
         <h5 class="mb-0"><i class="fa-solid fa-arrow-up me-2"></i>Gerçekleşen Giderler</h5>
     </div>
     <div class="card-body table-responsive p-0">
-        <table class="table table-striped table-hover table-sm mb-0">
+        <!-- id eklendi: expense-realized-table -->
+        <table id="expense-realized-table" class="table table-striped table-hover table-sm mb-0">
             <thead>
                 <tr>
-                    <th>Tarih</th>
+                    <!-- Tarih başlığı tıklanabilir -->
+                    <th>
+                        <a id="expense-sort-date" class="text-dark" data-order="asc" href="#">
+                            Tarih <i class="fa-solid fa-sort" id="expense-sort-date-icon"></i>
+                        </a>
+                    </th>
                     <th>Başlık / Açıklama</th>
-                    <th>Kime / Nereye</th>
-                    <th>Yöntem</th>
-                    <th class="text-end">Tutar</th>
+                    <!-- Kime / Nereye başlığı tıklanabilir -->
+                    <th>
+                        <a id="expense-sort-party" class="text-dark" data-order="asc" href="#">
+                            Kime / Nereye <i class="fa-solid fa-sort" id="expense-sort-party-icon"></i>
+                        </a>
+                    </th>
+                    <!-- Yöntem tıklanabilir -->
+                    <th>
+                        <a id="expense-sort-method" class="text-dark" data-order="asc" href="#">
+                            Yöntem <i class="fa-solid fa-sort" id="expense-sort-method-icon"></i>
+                        </a>
+                    </th>
+                    <th class="text-end">
+                        <a id="expense-sort-amount" class="text-dark" data-order="asc" href="#">
+                            Tutar <i class="fa-solid fa-sort" id="expense-sort-amount-icon"></i>
+                        </a>
+                    </th>
                 </tr>
             </thead>
             <tbody>
@@ -142,4 +187,90 @@
     </div>
 </div>
 {% endif %}
+
+<!-- JavaScript: Tarih, metin, daire-no ve sayı (tutar) sütunları için istemci tarafı sıralama -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // Yardımcı: dd.mm.yyyy -> Date
+    function parseDateDMY(text) {
+        var parts = (text || '').trim().split('.');
+        if (parts.length !== 3) return new Date(0);
+        var d = parseInt(parts[0], 10), m = parseInt(parts[1], 10) - 1, y = parseInt(parts[2], 10);
+        return new Date(y, m, d);
+    }
+
+    // Para metnini sayıya çevir (ör: "1.234.567 ₺" -> 1234567)
+    function parseAmount(text) {
+        var s = (text || '').trim();
+        s = s.replace(/[^\d\.,\-]/g, '');
+        s = s.replace(/\./g, '').replace(/,/g, '.');
+        var n = parseFloat(s);
+        return isNaN(n) ? 0 : n;
+    }
+
+    // Daire hücresinden "No: X" veya "No X" şeklindeki numarayı ayıkla
+    function parseFlatNumber(text) {
+        var s = (text || '').trim();
+        var m = s.match(/No[:\s]*([0-9]+)/i);
+        if (m && m[1]) return parseInt(m[1], 10);
+        // alternatif: "No" olmayabilir, dene son "No:" yerine son sayı
+        var m2 = s.match(/(\d+)\s*$/);
+        if (m2 && m2[1]) return parseInt(m2[1], 10);
+        return 0;
+    }
+
+    // Genel attach fonksiyonu: tableId, linkId, colIndex, type ('text'|'date'|'number'|'flat')
+    function attachSort(linkId, tableId, colIndex, type) {
+        var link = document.getElementById(linkId);
+        var table = document.getElementById(tableId);
+        if (!link || !table) return;
+        var icon = link.querySelector('i');
+        link.style.cursor = 'pointer';
+        link.addEventListener('click', function (e) {
+            e.preventDefault();
+            var tbody = table.tBodies[0];
+            if (!tbody) return;
+            var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+            var currentOrder = (link.dataset.order || 'asc').toLowerCase();
+            var newOrder = currentOrder === 'asc' ? 'desc' : 'asc';
+
+            rows.sort(function (a, b) {
+                var aCell = a.cells[colIndex] ? a.cells[colIndex].textContent.trim() : '';
+                var bCell = b.cells[colIndex] ? b.cells[colIndex].textContent.trim() : '';
+                var cmp = 0;
+                if (type === 'date') {
+                    cmp = parseDateDMY(aCell) - parseDateDMY(bCell);
+                } else if (type === 'number') {
+                    cmp = parseAmount(aCell) - parseAmount(bCell);
+                } else if (type === 'flat') {
+                    cmp = parseFlatNumber(aCell) - parseFlatNumber(bCell);
+                } else { // 'text'
+                    cmp = aCell.localeCompare(bCell, 'tr');
+                }
+                return newOrder === 'asc' ? cmp : -cmp;
+            });
+
+            rows.forEach(function (r) { tbody.appendChild(r); });
+            link.dataset.order = newOrder;
+            if (icon) {
+                icon.className = newOrder === 'asc' ? 'fa-solid fa-sort-up' : 'fa-solid fa-sort-down';
+            }
+        });
+    }
+
+    // Income table: Tarih (col 0, date), Kimden (col 1, text), Daire (col 2, flat), Yöntem (col 4, text), Tutar (col 5, number)
+    attachSort('income-sort-date', 'income-realized-table', 0, 'date');
+    attachSort('income-sort-party', 'income-realized-table', 1, 'text');
+    attachSort('income-sort-flat', 'income-realized-table', 2, 'flat');
+    attachSort('income-sort-method', 'income-realized-table', 4, 'text');
+    attachSort('income-sort-amount', 'income-realized-table', 5, 'number');
+
+    // Expense table: Tarih (col 0, date), Kime / Nereye (col 2, text), Yöntem (col 3, text), Tutar (col 4, number)
+    attachSort('expense-sort-date', 'expense-realized-table', 0, 'date');
+    attachSort('expense-sort-party', 'expense-realized-table', 2, 'text');
+    attachSort('expense-sort-method', 'expense-realized-table', 3, 'text');
+    attachSort('expense-sort-amount', 'expense-realized-table', 4, 'number');
+});
+</script>
+
 {% endblock %}
