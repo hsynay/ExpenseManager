@@ -2433,6 +2433,7 @@ def reports():
             paid_petty_expenses = cur.fetchone()[0]
             paid_expenses = paid_large_expenses + paid_petty_expenses
             remaining_expenses = total_expenses - paid_expenses
+            progress_percentage_expenses = (paid_expenses / total_expenses * 100) if total_expenses > 0 else 0
 
             if project_type == 'normal':
                 # --- GELİRLER ---
@@ -2469,6 +2470,7 @@ def reports():
                 unpaid_installments = cur.fetchone()[0]
 
                 progress_percentage = (collected_revenue / planned_revenue * 100) if planned_revenue > 0 else 0
+
                 net_cash_flow = collected_revenue - paid_expenses
 
                 summary.update({
@@ -2480,6 +2482,7 @@ def reports():
                     'total_expenses': total_expenses,
                     'net_cash_flow': net_cash_flow,
                     'progress_percentage': progress_percentage,
+                    'progress_percentage_expenses': progress_percentage_expenses,
                     'paid_installments': paid_installments,
                     'unpaid_installments': unpaid_installments
                 })
@@ -2494,7 +2497,7 @@ def reports():
                 """, (project_id,))
                 member_contributions = cur.fetchone()[0]
 
-                cash_balance = member_contributions - total_expenses
+                cash_balance = member_contributions - paid_expenses
 
                 summary.update({
                     'member_contributions': member_contributions,
