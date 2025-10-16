@@ -39,6 +39,7 @@
                         </li>
                     </ul>
 
+                    <h6 class="text-dark mb-3">Beklenen gelirin tahsilat oranı</h6>
                     <div class="progress mb-3" style="height: 18px;">
                         <div class="progress-bar fw-bold" role="progressbar" style="width: {{ s.progress_percentage }}%;">
                             {{ "%.1f"|format(s.progress_percentage) }}%
@@ -57,6 +58,14 @@
                             Kalan Gider: <strong class="text-warning">{{ s.remaining_expenses|thousands }} ₺</strong>
                         </li>
                     </ul>
+                    <h6 class="text-dark mb-3">Beklenen giderin ödeme oranı</h6>
+                    
+
+                    <div class="progress mb-3" style="height: 18px;">
+                        <div class="progress-bar fw-bold" role="progressbar" style="width: {{ s.progress_percentage_expenses }}%;">
+                            {{ "%.1f"|format(s.progress_percentage_expenses) }}%
+                        </div>
+                    </div>
 
                     <hr>
                     <p class="fw-bold">Net Nakit Durumu:
