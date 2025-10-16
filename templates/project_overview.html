@@ -57,6 +57,24 @@
                     <strong class="text-success fs-5">{{ total_paid_expense|thousands }} ₺</strong>
                 </div>
             </div>
+        
+            <div class="col-12 border-top mt-3 pt-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fw-bold"><i class="fa-solid fa-balance-scale text-dark me-1"></i>Proje Net Ciro:</span>
+                    {% set net_revenue = ((total_paid_income + total_unpaid_income)- (total_paid_expense + total_unpaid_expense)) %}
+                    <strong class="fs-5 text-dark">{{ net_revenue|thousands }} ₺</strong>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fw-bold"><i class="fa-solid fa-money-bill-wave text-dark me-1"></i>Net Nakit Akışı:</span>
+                    {% set net_cash_flow = (total_paid_income - total_paid_expense) %}
+                    <strong class="fs-5 {{ 'text-success' if net_cash_flow >= 0 else 'text-danger' }}">{{ net_cash_flow|thousands }} ₺</strong>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fw-bold"><i class="fa-solid fa-file-invoice-dollar text-dark me-1"></i>Genel Borç/Alacak Durumu:</span>
+                    {% set net_debt = (total_unpaid_income - total_unpaid_expense) %}
+                    <strong class="fs-5 {{ 'text-success' if net_debt >= 0 else 'text-danger' }}">{{ net_debt|thousands }} ₺</strong>
+                </div>
+            </div>
         </div>
     </div>
 </div>
