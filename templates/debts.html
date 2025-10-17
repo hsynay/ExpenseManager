@@ -31,7 +31,7 @@
                 <li class="nav-item">
                     <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><i class="fa-solid fa-home me-1"></i>Ana Sayfa</a>
                 </li>
-                <li class="nav-item mx-3"></li>
+                <!-- <li class="nav-item mx-3"></li>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_payment', 'list_payments', 'debt_status', 'select_project_for_expenses'] %}active{% endif %}" href="#" id="financialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fa-solid fa-coins me-1"></i> Finansal
@@ -40,13 +40,14 @@
                         <li><a class="dropdown-item" href="{{ url_for('assign_flat_owner') }}">Daire Satış Kaydı</a></li>
                         <li><a class="dropdown-item" href="{{ url_for('new_payment') }}">Yeni Gelir Kaydet</a></li>
                     </ul>
-                </li>
+                </li> -->
 
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_payment', 'list_payments', 'debt_status', 'select_project_for_expenses'] %}active{% endif %}" href="#" id="financialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_payment', 'list_payments', 'assign_flat_owner', 'debt_status', 'select_project_for_expenses'] %}active{% endif %}" href="#" id="financialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fa-solid fa-list me-1"></i> Muhasebe
                     </a>
                     <ul class="dropdown-menu" aria-labelledby="financialDropdown">
+                        <li><a class="dropdown-item" href="{{ url_for('assign_flat_owner') }}">Daire Satış Kaydı</a></li>
                         <li><a class="dropdown-item" href="{{ url_for('debt_status') }}">Gelir Muhasebe İşlemleri</a></li>
                         <li><a class="dropdown-item" href="{{ url_for('list_expenses') }}">Gider Muhasebe İşlemleri</a></li>
                         <li><hr class="dropdown-divider"></li>
@@ -148,18 +149,41 @@
                                 <div class="col-md-4"><div class="p-2 border rounded-3"><h6 class="text-muted small mb-1">Toplam Ödenen</h6><p class="h6 fw-bold mb-0 text-success">{{ flat.total_paid|thousands }} ₺</p></div></div>
                                 <div class="col-md-4"><div class="p-2 border rounded-3"><h6 class="text-muted small mb-1">Kalan Borç</h6><p class="h6 fw-bold mb-0 text-danger">{{ flat.remaining_debt|thousands }} ₺</p></div></div>
                             </div>
-                            <div class="table-responsive">
-                                <table class="table table-bordered table-sm">
-                                    <thead class="table-light"><tr><th>Vade Tarihi</th><th class="text-end">Taksit Tutarı</th><th class="text-end">Kalan</th><th class="text-center">Durum</th></tr></thead>
-                                    <tbody>
-                                        {% for inst in flat.installments %}
-                                        <tr class="{{ inst.css_class }}"><td>{{ inst.due_date.strftime('%d.%m.%Y') }}</td><td class="text-end">{{ inst.total_amount|thousands }} ₺</td><td class="text-end fw-bold">{{ inst.remaining_installment_due|thousands }} ₺</td><td class="text-center"><span class="badge small {% if inst.status == 'Ödendi' %} bg-success {% elif 'Kısmen' in inst.status %} bg-warning text-dark {% elif inst.status == 'Gecikmiş' %} bg-danger {% else %} bg-secondary {% endif %}">{{ inst.status }}</span></td></tr>
-                                        {% else %}
-                                        <tr><td colspan="4" class="text-center text-muted p-2 small">Ödeme planı oluşturulmamış.</td></tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-sm">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Vade Tarihi</th>
+                                        <th class="text-end">Taksit Tutarı</th>
+                                        <th class="text-end">Kalan</th>
+                                        <th class="text-center">Durum</th>
+                                        <th class="text-center">İşlemler</th> {# YENİ SÜTUN BAŞLIĞI #}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for inst in flat.installments %}
+                                    <tr class="{{ inst.css_class }}">
+                                        <td>{{ inst.due_date.strftime('%d.%m.%Y') }}</td>
+                                        <td class="text-end">{{ inst.total_amount|thousands }} ₺</td>
+                                        <td class="text-end fw-bold">{{ inst.remaining_installment_due|thousands }} ₺</td>
+                                        <td class="text-center"><span class="badge small {% if inst.status == 'Ödendi' %} bg-success {% elif 'Kısmen' in inst.status %} bg-warning text-dark {% elif inst.status == 'Gecikmiş' %} bg-danger {% else %} bg-secondary {% endif %}">{{ inst.status }}</span></td>
+                                        {# YENİ SÜTUN İÇERİĞİ #}
+                                        <td class="text-center">
+                                            {% if inst.status != 'Ödendi' %}
+                                                <a href="{{ url_for('new_payment', installment_id=inst.id) }}" class="btn btn-sm btn-success">
+                                                    <i class="fa-solid fa-cash-register me-1"></i> Tahsilat Yap
+                                                </a>
+                                            {% else %}
+                                                <i class="fa-solid fa-check-circle text-success fs-5"></i>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% else %}
+                                    <tr><td colspan="5" class="text-center text-muted p-2 small">Ödeme planı oluşturulmamış.</td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
                             
                             {% if flat.payments %}
                             <hr>
