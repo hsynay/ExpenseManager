@@ -2686,19 +2686,119 @@ def index():
 
 # new_payment fonksiyonu
 
-@app.route('/payment/new', methods=['GET', 'POST'])
-def new_payment():
+# @app.route('/payment/new', methods=['GET', 'POST'])
+# def new_payment():
+#     if 'user_id' not in session:
+#         return redirect(url_for('login'))
+
+#     if request.method == 'POST':
+#         conn = None
+#         try:
+#             conn = get_connection()
+#             cur = conn.cursor()
+
+#             flat_id = int(request.form.get('flat_id'))
+#             payment_amount = Decimal(request.form.get('amount'))
+#             payment_date_str = request.form.get('payment_date') 
+#             description = request.form.get('description', '')
+#             payment_method = request.form.get('payment_method', 'nakit')
+
+#             if not all([flat_id, payment_amount, payment_date_str]):
+#                 flash('Lütfen tüm zorunlu alanları doldurun.', 'danger')
+#                 return redirect(url_for('new_payment'))
+
+#             payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d').date()
+
+#             cur.execute("SELECT owner_id FROM flats WHERE id = %s", (flat_id,))
+#             customer_id_result = cur.fetchone()
+#             if not customer_id_result:
+#                 flash('Daire sahibi bulunamadı.', 'danger')
+#                 return redirect(url_for('new_payment'))
+#             customer_id = customer_id_result[0]
+
+#             if payment_method == 'nakit':
+#                 cur.execute(
+#                     "INSERT INTO payments (flat_id, amount, payment_date, description, payment_method) VALUES (%s, %s, %s, %s, %s)",
+#                     (flat_id, payment_amount, payment_date, description or 'Nakit Ödeme', 'nakit')
+#                 )
+                
+#                 amount_to_distribute = payment_amount
+#                 cur.execute("SELECT id, amount, paid_amount FROM installment_schedule WHERE flat_id = %s AND is_paid = FALSE ORDER BY due_date ASC", (flat_id,))
+#                 unpaid_installments = cur.fetchall()
+#                 for inst_id, total_amount, paid_amount in unpaid_installments:
+#                     if amount_to_distribute <= 0: break
+#                     remaining_due = total_amount - paid_amount
+#                     if amount_to_distribute >= remaining_due:
+#                         cur.execute("UPDATE installment_schedule SET paid_amount = %s, is_paid = TRUE WHERE id = %s", (total_amount, inst_id))
+#                         amount_to_distribute -= remaining_due
+#                     else:
+#                         new_paid_amount = paid_amount + amount_to_distribute
+#                         cur.execute("UPDATE installment_schedule SET paid_amount = %s WHERE id = %s", (new_paid_amount, inst_id))
+#                         amount_to_distribute = 0
+                
+#                 flash(f'{format_thousands(payment_amount)} ₺ tutarındaki nakit ödeme kaydedildi ve borca yansıtıldı.', 'success')
+
+#             elif payment_method == 'çek':
+#                 due_date_str = request.form.get('check_due_date')
+#                 bank_name = request.form.get('check_bank_name')
+#                 check_number = request.form.get('check_number')
+
+#                 if not due_date_str:
+#                     flash('Çek ödemesi için Vade Tarihi zorunludur.', 'danger')
+#                     return redirect(url_for('new_payment'))
+
+#                 due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()
+
+#                 cur.execute(
+#                     "INSERT INTO checks (customer_id, bank_name, check_number, amount, issue_date, due_date) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+#                     (customer_id, bank_name, check_number, payment_amount, payment_date, due_date)
+#                 )
+#                 check_id = cur.fetchone()[0]
+
+#                 cur.execute(
+#                     "INSERT INTO payments (flat_id, amount, payment_date, description, payment_method, check_id) VALUES (%s, %s, %s, %s, %s, %s)",
+#                     (flat_id, payment_amount, payment_date, description or f'{bank_name} - {check_number} Nolu Çek', 'çek', check_id)
+#                 )
+                
+#                 flash(f'Vadesi {due_date.strftime("%d.%m.%Y")} olan {format_thousands(payment_amount)} ₺ tutarındaki çek başarıyla portföye eklendi.', 'success')
+
+#             conn.commit()
+#             return redirect(url_for('debt_status'))
+
+#         except Exception as e:
+#             if conn: conn.rollback()
+#             flash(f'Ödeme kaydedilirken bir hata oluştu: {e}', 'danger')
+#             return redirect(url_for('new_payment'))
+#         finally:
+#             if conn:
+#                 cur.close()
+#                 conn.close()
+
+#     # GET isteği
+#     conn = get_connection()
+#     cur = conn.cursor()
+#     cur.execute("SELECT id, name FROM projects ORDER BY name")
+#     projects = cur.fetchall()
+#     cur.close()
+#     conn.close()
+#     return render_template('new_payment.html', projects=projects, user_name=session.get('user_name'))
+
+# app.py dosyanızda SADECE BU new_payment fonksiyonu kalmalı
+
+@app.route('/payment/new', defaults={'installment_id': None}, methods=['GET', 'POST'])
+@app.route('/payment/new/<int:installment_id>', methods=['GET', 'POST'])
+def new_payment(installment_id):
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
-    if request.method == 'POST':
-        conn = None
-        try:
-            conn = get_connection()
-            cur = conn.cursor()
+    conn = get_connection()
+    cur = conn.cursor()
 
+    if request.method == 'POST':
+        try:
             flat_id = int(request.form.get('flat_id'))
-            payment_amount = Decimal(request.form.get('amount'))
+            # Formdan gelen formatlı sayıyı temizleyerek Decimal'e çeviriyoruz
+            payment_amount = Decimal(request.form.get('amount').replace('.', '').replace(',', '.'))
             payment_date_str = request.form.get('payment_date') 
             description = request.form.get('description', '')
             payment_method = request.form.get('payment_method', 'nakit')
@@ -2710,80 +2810,89 @@ def new_payment():
             payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d').date()
 
             cur.execute("SELECT owner_id FROM flats WHERE id = %s", (flat_id,))
-            customer_id_result = cur.fetchone()
-            if not customer_id_result:
-                flash('Daire sahibi bulunamadı.', 'danger')
-                return redirect(url_for('new_payment'))
-            customer_id = customer_id_result[0]
+            customer_id = cur.fetchone()[0]
 
             if payment_method == 'nakit':
                 cur.execute(
                     "INSERT INTO payments (flat_id, amount, payment_date, description, payment_method) VALUES (%s, %s, %s, %s, %s)",
                     (flat_id, payment_amount, payment_date, description or 'Nakit Ödeme', 'nakit')
                 )
-                
-                amount_to_distribute = payment_amount
-                cur.execute("SELECT id, amount, paid_amount FROM installment_schedule WHERE flat_id = %s AND is_paid = FALSE ORDER BY due_date ASC", (flat_id,))
-                unpaid_installments = cur.fetchall()
-                for inst_id, total_amount, paid_amount in unpaid_installments:
-                    if amount_to_distribute <= 0: break
-                    remaining_due = total_amount - paid_amount
-                    if amount_to_distribute >= remaining_due:
-                        cur.execute("UPDATE installment_schedule SET paid_amount = %s, is_paid = TRUE WHERE id = %s", (total_amount, inst_id))
-                        amount_to_distribute -= remaining_due
-                    else:
-                        new_paid_amount = paid_amount + amount_to_distribute
-                        cur.execute("UPDATE installment_schedule SET paid_amount = %s WHERE id = %s", (new_paid_amount, inst_id))
-                        amount_to_distribute = 0
-                
+                reconcile_customer_payments(cur, flat_id)
                 flash(f'{format_thousands(payment_amount)} ₺ tutarındaki nakit ödeme kaydedildi ve borca yansıtıldı.', 'success')
 
             elif payment_method == 'çek':
                 due_date_str = request.form.get('check_due_date')
-                bank_name = request.form.get('check_bank_name')
-                check_number = request.form.get('check_number')
-
                 if not due_date_str:
                     flash('Çek ödemesi için Vade Tarihi zorunludur.', 'danger')
-                    return redirect(url_for('new_payment'))
-
+                    return redirect(url_for('new_payment', installment_id=installment_id))
+                
                 due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()
-
                 cur.execute(
                     "INSERT INTO checks (customer_id, bank_name, check_number, amount, issue_date, due_date) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                    (customer_id, bank_name, check_number, payment_amount, payment_date, due_date)
+                    (customer_id, request.form.get('check_bank_name'), request.form.get('check_number'), payment_amount, payment_date, due_date)
                 )
                 check_id = cur.fetchone()[0]
-
                 cur.execute(
                     "INSERT INTO payments (flat_id, amount, payment_date, description, payment_method, check_id) VALUES (%s, %s, %s, %s, %s, %s)",
-                    (flat_id, payment_amount, payment_date, description or f'{bank_name} - {check_number} Nolu Çek', 'çek', check_id)
+                    (flat_id, payment_amount, payment_date, description or f'Çek Ödemesi', 'çek', check_id)
                 )
-                
-                flash(f'Vadesi {due_date.strftime("%d.%m.%Y")} olan {format_thousands(payment_amount)} ₺ tutarındaki çek başarıyla portföye eklendi.', 'success')
+                flash(f'Çek başarıyla portföye eklendi. Tahsil edildiğinde borca yansıtılacaktır.', 'success')
 
             conn.commit()
             return redirect(url_for('debt_status'))
-
         except Exception as e:
-            if conn: conn.rollback()
+            conn.rollback()
             flash(f'Ödeme kaydedilirken bir hata oluştu: {e}', 'danger')
-            return redirect(url_for('new_payment'))
+            return redirect(url_for('new_payment', installment_id=installment_id))
         finally:
-            if conn:
-                cur.close()
-                conn.close()
+            cur.close()
+            conn.close()
 
-    # GET isteği
-    conn = get_connection()
-    cur = conn.cursor()
+    # --- GET isteği ---
+    installment_info = None
+    flats_for_project = []
+    
+    if installment_id:
+        cur.execute("""
+            SELECT 
+                s.id, s.due_date, s.amount, s.paid_amount,
+                f.id as flat_id, f.block_name, f.floor, f.flat_no,
+                p.id as project_id, p.name as project_name,
+                c.first_name, c.last_name
+            FROM installment_schedule s
+            JOIN flats f ON s.flat_id = f.id
+            JOIN projects p ON f.project_id = p.id
+            JOIN customers c ON f.owner_id = c.id
+            WHERE s.id = %s
+        """, (installment_id,))
+        inst = cur.fetchone()
+        if inst:
+            installment_info = {
+                'id': inst[0], 'due_date': inst[1],
+                'total_amount': inst[2], 'paid_amount': inst[3] or Decimal(0),
+                'remaining_due': (inst[2] - (inst[3] or Decimal(0))),
+                'flat_id': inst[4],
+                'flat_details': f"Blok: {inst[5] or 'N/A'}, Kat: {inst[6]}, No: {inst[7]}",
+                'project_id': inst[8], 'project_name': inst[9],
+                'customer_name': f"{inst[10]} {inst[11]}"
+            }
+            cur.execute("""
+                SELECT f.id, f.block_name, f.floor, f.flat_no, c.first_name, c.last_name FROM flats f
+                JOIN customers c ON f.owner_id = c.id
+                WHERE f.project_id = %s ORDER BY f.block_name, f.flat_no
+            """, (installment_info['project_id'],))
+            flats_for_project = [{'id': row[0], 'text': f"Blok: {row[1]}, Kat: {row[2]}, No: {row[3]} - ({row[4]} {row[5]})"} for row in cur.fetchall()]
+
     cur.execute("SELECT id, name FROM projects ORDER BY name")
     projects = cur.fetchall()
     cur.close()
     conn.close()
-    return render_template('new_payment.html', projects=projects, user_name=session.get('user_name'))
 
-
+    return render_template('new_payment.html', 
+                           projects=projects,
+                           installment_info=installment_info,
+                           flats_for_project=flats_for_project,
+                           user_name=session.get('user_name'))
 
 # GÜNCELLENMİŞ FONKSİYON: delete_payment
 @app.route('/payment/<int:payment_id>/delete', methods=['POST'])

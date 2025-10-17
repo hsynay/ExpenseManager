@@ -7,7 +7,7 @@
     <div class="col-lg-8">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2 class="fw-bold"><i class="fa-solid fa-hand-holding-dollar me-2 text-success"></i>Yeni Gelir Kaydet</h2>
-            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Ana sayfaya dön</a>
+            <a href="{{ url_for('debt_status') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Geri Dön</a>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -15,6 +15,16 @@
             <div class="alert alert-{{ category }} d-flex align-items-center mb-4"><i class="fa-solid fa-circle-exclamation me-2"></i>{{ msg }}</div>
           {% endfor %}
         {% endwith %}
+
+        {% if installment_info %}
+        <div class="alert alert-info">
+            <strong>Ödeme Yapılan Taksit Bilgileri:</strong><br>
+            <strong>Müşteri:</strong> {{ installment_info.customer_name }}<br>
+            <strong>Proje:</strong> {{ installment_info.project_name }} | <strong>Daire:</strong> {{ installment_info.flat_details }}<br>
+            <strong>Vade Tarihi:</strong> {{ installment_info.due_date.strftime('%d.%m.%Y') }}<br>
+            <strong>Kalan Taksit Borcu:</strong> <span class="fw-bold text-danger">{{ installment_info.remaining_due|thousands }} ₺</span>
+        </div>
+        {% endif %}
 
         <div class="card">
             <div class="card-body p-4">
@@ -25,14 +35,21 @@
                             <select class="form-select" id="project_id" name="project_id" required>
                                 <option value="" selected disabled>Proje seçin...</option>
                                 {% for project in projects %}
-                                <option value="{{ project[0] }}">{{ project[1] }}</option>
+                                <option value="{{ project[0] }}" {% if installment_info and project[0] == installment_info.project_id %}selected{% endif %}>{{ project[1] }}</option>
                                 {% endfor %}
                             </select>
                         </div>
                         <div class="col-md-6">
                             <label for="flat_id" class="form-label fw-semibold">Daire (*)</label>
-                            <select class="form-select" id="flat_id" name="flat_id" required disabled>
-                                <option value="">Önce proje seçin...</option>
+                            <select class="form-select" id="flat_id" name="flat_id" required {% if not installment_info %}disabled{% endif %}>
+                                {% if installment_info %}
+                                    <option value="" selected disabled>Daire seçin...</option>
+                                    {% for flat in flats_for_project %}
+                                        <option value="{{ flat.id }}" {% if flat.id == installment_info.flat_id %}selected{% endif %}>{{ flat.text }}</option>
+                                    {% endfor %}
+                                {% else %}
+                                    <option value="">Önce proje seçin...</option>
+                                {% endif %}
                             </select>
                         </div>
                     </div>
@@ -40,7 +57,7 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="amount" class="form-label fw-semibold">Ödeme Tutarı (₺) (*)</label>
-                            <input type="text" class="form-control thousands-input" id="amount" name="amount" required>
+                            <input type="text" class="form-control thousands-input" id="amount" name="amount" value="{{ installment_info.remaining_due if installment_info else '' }}" required>
                         </div>
                         <div class="col-md-6">
                             <label for="payment_date" class="form-label fw-semibold">İşlem Tarihi (*)</label>
@@ -86,7 +103,7 @@
                     </div>
 
                     <div class="d-grid gap-2 d-md-flex justify-content-md-end">
-                        <a href="{{ url_for('dashboard') }}" class="btn btn-secondary px-4"><i class="fa-solid fa-times me-2"></i>İptal</a>
+                        <a href="{{ url_for('debt_status') }}" class="btn btn-secondary px-4"><i class="fa-solid fa-times me-2"></i>İptal</a>
                         <button type="submit" class="btn btn-success px-4"><i class="fa-solid fa-save me-2"></i>Geliri Kaydet</button>
                     </div>
                 </form>
