@@ -16,6 +16,7 @@
           {% endfor %}
         {% endwith %}
 
+        {# Normal taksit ödemesi için bilgi #}
         {% if installment_info %}
         <div class="alert alert-info">
             <strong>Ödeme Yapılan Taksit Bilgileri:</strong><br>
@@ -23,6 +24,16 @@
             <strong>Proje:</strong> {{ installment_info.project_name }} | <strong>Daire:</strong> {{ installment_info.flat_details }}<br>
             <strong>Vade Tarihi:</strong> {{ installment_info.due_date.strftime('%d.%m.%Y') }}<br>
             <strong>Kalan Taksit Borcu:</strong> <span class="fw-bold text-danger">{{ installment_info.remaining_due|thousands }} ₺</span>
+        </div>
+        {% endif %}
+
+        {# **** YENİ: Kooperatif aidatı girişi için bilgi **** #}
+        {% if coop_payment_info %}
+        <div class="alert alert-primary"> {# Farklı renk kullandık #}
+            <strong>Aidat/Katkı Payı Girişi:</strong><br>
+            <strong>Üye:</strong> {{ coop_payment_info.customer_name }}<br>
+            <strong>Proje:</strong> {{ coop_payment_info.project_name }} | <strong>Daire:</strong> {{ coop_payment_info.flat_details }}<br>
+            <em class="small text-muted">Aşağıdaki tutar ve tarih alanlarını doldurarak yeni bir katkı payı kaydedebilirsiniz.</em>
         </div>
         {% endif %}
 
@@ -35,17 +46,28 @@
                             <select class="form-select" id="project_id" name="project_id" required>
                                 <option value="" selected disabled>Proje seçin...</option>
                                 {% for project in projects %}
-                                <option value="{{ project[0] }}" {% if installment_info and project[0] == installment_info.project_id %}selected{% endif %}>{{ project[1] }}</option>
+                                    {# **** GÜNCELLEME: Hem installment hem de coop bilgisini kontrol et **** #}
+                                    <option value="{{ project[0] }}"
+                                            {% if installment_info and project[0] == installment_info.project_id %}selected{% endif %}
+                                            {% if coop_payment_info and project[0] == coop_payment_info.project_id %}selected{% endif %}>
+                                        {{ project[1] }}
+                                    </option>
                                 {% endfor %}
                             </select>
                         </div>
                         <div class="col-md-6">
                             <label for="flat_id" class="form-label fw-semibold">Daire (*)</label>
-                            <select class="form-select" id="flat_id" name="flat_id" required {% if not installment_info %}disabled{% endif %}>
-                                {% if installment_info %}
+                            {# **** GÜNCELLEME: Başlangıçta doluysa veya bilgi varsa enabled yap **** #}
+                            <select class="form-select" id="flat_id" name="flat_id" required {% if not installment_info and not coop_payment_info %}disabled{% endif %}>
+                                {# **** GÜNCELLEME: Eğer serverdan flat listesi geldiyse onu kullan **** #}
+                                {% if flats_for_project %}
                                     <option value="" selected disabled>Daire seçin...</option>
                                     {% for flat in flats_for_project %}
-                                        <option value="{{ flat.id }}" {% if flat.id == installment_info.flat_id %}selected{% endif %}>{{ flat.text }}</option>
+                                        <option value="{{ flat.id }}"
+                                                {% if installment_info and flat.id == installment_info.flat_id %}selected{% endif %}
+                                                {% if coop_payment_info and flat.id == coop_payment_info.flat_id %}selected{% endif %}>
+                                            {{ flat.text }}
+                                        </option>
                                     {% endfor %}
                                 {% else %}
                                     <option value="">Önce proje seçin...</option>
@@ -57,14 +79,15 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="amount" class="form-label fw-semibold">Ödeme Tutarı (₺) (*)</label>
-                            <input type="text" class="form-control thousands-input" id="amount" name="amount" value="{{ installment_info.remaining_due if installment_info else '' }}" required>
+                            {# Taksit bilgisi varsa kalan borcu, yoksa boş getir #}
+                            <input type="text" class="form-control thousands-input" id="amount" name="amount" value="{{ installment_info.remaining_due|thousands if installment_info else '' }}" required>
                         </div>
                         <div class="col-md-6">
                             <label for="payment_date" class="form-label fw-semibold">İşlem Tarihi (*)</label>
                             <input type="date" class="form-control" id="payment_date" name="payment_date" required>
                         </div>
                     </div>
-                    
+
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Ödeme Yöntemi (*)</label>
                         <div>
@@ -96,10 +119,10 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="mb-4">
                         <label for="description" class="form-label fw-semibold">Açıklama</label>
-                        <textarea class="form-control" name="description" id="description" rows="3" placeholder="Örn: Müşteri Elden Ödeme, Banka Havalesi vb."></textarea>
+                        <textarea class="form-control" name="description" id="description" rows="3" placeholder="Örn: Müşteri Elden Ödeme, Banka Havalesi, Temmuz Ayı Aidatı vb."></textarea>
                     </div>
 
                     <div class="d-grid gap-2 d-md-flex justify-content-md-end">
@@ -117,13 +140,21 @@
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         const today = new Date().toISOString().split('T')[0];
-        document.getElementById('payment_date').value = today;
+        const paymentDateInput = document.getElementById('payment_date');
+        // **** GÜNCELLEME: Sadece boşsa bugünü ata ****
+        if (!paymentDateInput.value) {
+            paymentDateInput.value = today;
+        }
 
         const projectSelect = document.getElementById('project_id');
         const flatSelect = document.getElementById('flat_id');
 
+        // **** GÜNCELLEME: Başlangıçta flat listesinin dolu olup olmadığını kontrol et ****
+        const hasInitialFlats = flatSelect && flatSelect.options.length > 1 && flatSelect.options[0].value === "" && flatSelect.options[1].value !== "";
+
         projectSelect.addEventListener('change', function() {
             const projectId = this.value;
+            // Daire listesini temizle ve yükleniyor göster
             flatSelect.innerHTML = '<option value="">Yükleniyor...</option>';
             flatSelect.disabled = true;
 
@@ -132,42 +163,70 @@
                 return;
             }
 
+            // API'den daireleri çek
             fetch(`/api/project/${projectId}/flats`)
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) { throw new Error('Network response was not ok'); }
+                    return response.json();
+                 })
                 .then(data => {
-                    flatSelect.innerHTML = '<option value="" selected disabled>Daire seçin...</option>';
-                    if (data.length === 0) {
-                         flatSelect.innerHTML = '<option value="">Bu projede sahibi olan daire bulunamadı.</option>';
-                         return;
+                    flatSelect.innerHTML = '<option value="" selected disabled>Daire seçin...</option>'; // Placeholder ekle
+                    if (!data || data.length === 0) {
+                         flatSelect.innerHTML = '<option value="">Bu projede sahibi atanmış daire bulunamadı.</option>';
+                         return; // Daire yoksa bitir
                     }
+                    // Gelen daireleri listeye ekle
                     data.forEach(flat => {
                         const option = document.createElement('option');
                         option.value = flat.id;
-                        option.textContent = flat.text;
+                        option.textContent = flat.text; // API'den gelen formatlı metin
                         flatSelect.appendChild(option);
                     });
-                    flatSelect.disabled = false;
+                    flatSelect.disabled = false; // Seçimi aktif et
                 })
                 .catch(error => {
-                    console.error('Hata:', error);
+                    console.error('Daireler yüklenirken hata oluştu:', error);
                     flatSelect.innerHTML = '<option value="">Daireler yüklenemedi.</option>';
                 });
         });
-        
+
+        // **** GÜNCELLEME: Eğer başlangıçta flat listesi yoksa VE proje seçiliyse, fetch'i tetikle ****
+        if (!hasInitialFlats && projectSelect.value) {
+           projectSelect.dispatchEvent(new Event('change'));
+           // Eğer query parametresi ile gelindiyse (coop_payment_info varsa), flat'ı seçili hale getirmemiz gerekebilir.
+           // Flask tarafında flat listesini doldurup 'selected' eklemek daha sağlam bir yöntem.
+           // JavaScript tarafında fetch bittikten sonra seçmek için:
+           {% if coop_payment_info %}
+                // Fetch işleminin bitmesini beklemek için küçük bir gecikme veya Promise kullanmak gerekir.
+                // Şimdilik Flask tarafının hallettiğini varsayıyoruz.
+                // Eğer Flask halletmiyorsa buraya flatSelect.value = {{ coop_payment_info.flat_id }}; eklenmeli
+                // ama fetch sonrası çalışacak şekilde ayarlanmalı.
+           {% endif %}
+        }
+
+
         const checkFields = document.getElementById('check_fields');
         const checkDueDateInput = document.getElementById('check_due_date');
-        
+        const methodCheckRadio = document.getElementById('method_cek');
+
+        // Çek alanlarını göster/gizle fonksiyonu
+        function toggleCheckFields() {
+             if (methodCheckRadio.checked) {
+                 checkFields.style.display = 'block';
+                 checkDueDateInput.required = true;
+             } else {
+                 checkFields.style.display = 'none';
+                 checkDueDateInput.required = false;
+             }
+        }
+
+        // Radio butonlarına event listener ekle
         document.querySelectorAll('input[name="payment_method"]').forEach(radio => {
-            radio.addEventListener('change', function() {
-                if (this.value === 'çek') {
-                    checkFields.style.display = 'block';
-                    checkDueDateInput.required = true;
-                } else {
-                    checkFields.style.display = 'none';
-                    checkDueDateInput.required = false;
-                }
-            });
+            radio.addEventListener('change', toggleCheckFields);
         });
+
+        // **** YENİ: Sayfa yüklendiğinde de kontrol et ****
+        toggleCheckFields();
     });
 </script>
 {% endblock %}

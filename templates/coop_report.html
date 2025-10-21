@@ -2,6 +2,14 @@
 
 {% block title %}{{ report_data.project_name }} - Aylık Rapor{% endblock %}
 
+{% block extra_head %}
+<style>
+    /* İsteğe bağlı: Tablo hücrelerini biraz daha daraltabiliriz */
+    .table td, .table th { padding: 0.4rem 0.5rem; }
+</style>
+{% endblock %}
+
+
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
@@ -12,11 +20,13 @@
 </div>
 
 <div class="row g-4">
+    {# Özet Kartları aynı kalıyor #}
     <div class="col-md-3"><div class="card text-center p-3"><div class="card-title text-muted">Önceki Aydan Devir</div><p class="h4 fw-bold {% if report_data.previous_balance < 0 %}text-danger{% endif %}">{{ report_data.previous_balance|thousands }} ₺</p></div></div>
     <div class="col-md-3"><div class="card text-center p-3"><div class="card-title text-muted">Bu Ayki Gelir</div><p class="h4 fw-bold text-success">+ {{ report_data.current_income|thousands }} ₺</p></div></div>
     <div class="col-md-3"><div class="card text-center p-3"><div class="card-title text-muted">Bu Ayki Gider</div><p class="h4 fw-bold text-danger">- {{ report_data.current_expense|thousands }} ₺</p></div></div>
     <div class="col-md-3"><div class="card text-center bg-dark text-white p-3"><div class="card-title">Ay Sonu Bakiye</div><p class="h4 fw-bold {% if report_data.end_of_month_balance < 0 %}text-warning{% endif %}">{{ report_data.end_of_month_balance|thousands }} ₺</p></div></div>
 
+    {# Aidat Hesaplama Yardımcısı aynı kalıyor #}
     <div class="col-12">
         <div class="card bg-light">
             <div class="card-body text-center">
@@ -34,34 +44,100 @@
         </div>
     </div>
 
-    <div class="col-md-6">
+    {# --- Gelir Detayları Tablosu Güncellendi --- #}
+    <div class="col-12"> {# Tam genişlik #}
         <div class="card">
             <div class="card-header"><h5 class="mb-0">Gelir Detayları ({{ report_data.report_period }})</h5></div>
-            <div class="card-body table-responsive"><table class="table table-sm table-striped">
-                <thead><tr><th>Tarih</th><th>Müşteri</th><th>Açıklama</th><th class="text-end">Tutar</th></tr></thead>
-                <tbody>
-                    {% for p in report_data.income_details %}
-                    <tr><td>{{ p[0].strftime('%d.%m') }}</td><td>{{ p[1] }}</td><td>{{ p[2] }}</td><td class="text-end text-success fw-bold">+ {{ p[3]|thousands }} ₺</td></tr>
-                    {% else %}
-                    <tr><td colspan="4" class="text-center text-muted p-3">Bu ay gelir kaydı yok.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table></div>
+            <div class="card-body table-responsive p-0"> {# Padding sıfırlandı #}
+                <table class="table table-sm table-striped table-hover mb-0"> {# mb-0 eklendi #}
+                    <thead>
+                        <tr>
+                            <th>Tarih</th>
+                            <th>Üye</th>
+                            <th>Daire</th>
+                            <th>Açıklama</th>
+                            <th>Yöntem</th>
+                            <th class="text-center">Durum</th>
+                            <th class="text-end">Tutar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in report_data.income_details %}
+                        <tr>
+                            <td>{{ p.date.strftime('%d.%m.%Y') }}</td>
+                            <td>{{ p.customer }}</td>
+                            <td class="small text-muted">{{ p.flat }}</td>
+                            <td>{{ p.description or '-' }}</td>
+                            <td>
+                                {% if p.method == 'çek' %}
+                                    <span class="badge bg-info text-dark"><i class="fa-solid fa-money-check-dollar me-1"></i> Çek</span>
+                                {% else %}
+                                    <span class="badge bg-success"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <span class="badge bg-{{ p.status_class }}">{{ p.status_text }}</span>
+                            </td>
+                            <td class="text-end text-success fw-bold">+ {{ p.amount|thousands }} ₺</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="7" class="text-center text-muted p-3">Bu ay gelir kaydı yok.</td></tr> {# Colspan 7 oldu #}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
-    <div class="col-md-6">
+
+    {# --- Gider Detayları Tablosu Güncellendi --- #}
+    <div class="col-12"> {# Tam genişlik #}
         <div class="card">
             <div class="card-header"><h5 class="mb-0">Gider Detayları ({{ report_data.report_period }})</h5></div>
-            <div class="card-body table-responsive"><table class="table table-sm table-striped">
-                <thead><tr><th>Tarih</th><th>Başlık</th><th>Açıklama</th><th class="text-end">Tutar</th></tr></thead>
-                <tbody>
-                    {% for e in report_data.expense_details %}
-                    <tr><td>{{ e[0].strftime('%d.%m') }}</td><td>{{ e[1] }}</td><td>{{ e[2] }}</td><td class="text-end text-danger fw-bold">- {{ e[3]|thousands }} ₺</td></tr>
-                    {% else %}
-                    <tr><td colspan="4" class="text-center text-muted p-3">Bu ay gider kaydı yok.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table></div>
+            <div class="card-body table-responsive p-0"> {# Padding sıfırlandı #}
+                <table class="table table-sm table-striped table-hover mb-0"> {# mb-0 eklendi #}
+                    <thead>
+                        <tr>
+                            <th>Tarih</th>
+                            <th>Tip</th>
+                            <th>Başlık/Tedarikçi</th>
+                            <th>Açıklama</th>
+                            <th>Yöntem</th>
+                            <th class="text-center">Durum</th>
+                            <th class="text-end">Tutar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for e in report_data.expense_details %}
+                        <tr>
+                            <td>{{ e.date.strftime('%d.%m.%Y') }}</td>
+                            <td><span class="badge bg-secondary">{{ e.type }}</span></td>
+                            <td>
+                                {% if e.type == 'Büyük Gider' %}
+                                    <div><strong>{{ e.title }}</strong></div>
+                                    <div class="small text-muted">{{ e.supplier }}</div>
+                                {% else %}
+                                    {{ e.title }}
+                                {% endif %}
+                            </td>
+                            <td>{{ e.description or '-' }}</td>
+                            <td>
+                                {% if e.method == 'çek' %}
+                                    <span class="badge bg-info text-dark"><i class="fa-solid fa-money-check-dollar me-1"></i> Çek</span>
+                                {% else %}
+                                    <span class="badge bg-danger"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                 <span class="badge bg-{{ e.status_class }}">{{ e.status_text }}</span>
+                            </td>
+                            <td class="text-end text-danger fw-bold">- {{ e.amount|thousands }} ₺</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="7" class="text-center text-muted p-3">Bu ay gider kaydı yok.</td></tr> {# Colspan 7 oldu #}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>

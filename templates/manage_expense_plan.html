@@ -71,12 +71,79 @@
                 <div class="col-md-2"><button type="button" class="btn btn-danger w-100 remove-row"><i class="fa-solid fa-trash-alt"></i></button></div>
             `;
             container.appendChild(newRow);
+            // Yeni eklenen input için init çağrısı (diğer sayfalarda kullandığımız yöntemle uyumlu)
+            const newInput = newRow.querySelector('.thousands-input');
+            if (newInput && typeof window.initThousandsInput === 'function') {
+                window.initThousandsInput(newInput);
+            }
         });
         container.addEventListener('click', function(e) {
             if (e.target && e.target.closest('.remove-row')) {
                 e.target.closest('.installment-row').remove();
             }
         });
+
+        // --- Ortak fonksiyonlar: global olarak tanımla ---
+        window.formatIntegerPart = function(s){
+            return s.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+        };
+
+        window.formatInputValue = function(raw){
+            if(!raw) return '';
+            raw = String(raw);
+            raw = raw.replace(/\s/g,'')
+            const lastComma = raw.lastIndexOf(',');
+            const lastDot = raw.lastIndexOf('.');
+            let sepIndex = Math.max(lastComma, lastDot);
+            let intPart = raw;
+            let fracPart = '';
+            if(sepIndex !== -1){
+                intPart = raw.slice(0, sepIndex);
+                fracPart = raw.slice(sepIndex+1).replace(/\D/g,'');
+            }
+            intPart = intPart.replace(/\D/g,'');
+            if(intPart === '') intPart = '0';
+            intPart = window.formatIntegerPart(intPart);
+            return fracPart ? intPart + ',' + fracPart : intPart;
+        };
+
+        // Tek bir input'u başlatan fonksiyon (diğer şablonlardaki ile aynı isim)
+        window.initThousandsInput = function(inputEl){
+            if (!inputEl) return;
+            let timer = null;
+            inputEl.addEventListener('input', function(e){
+                clearTimeout(timer);
+                const el = e.target;
+                timer = setTimeout(function(){
+                    const pos = el.selectionStart;
+                    const oldLen = el.value.length;
+                    el.value = window.formatInputValue(el.value);
+                    const newLen = el.value.length;
+                    const diff = newLen - oldLen;
+                    try {
+                        el.setSelectionRange(Math.max(0, pos + diff), Math.max(0, pos + diff));
+                    } catch(err){}
+                }, 120);
+            });
+        };
+
+        // Mevcut tüm .thousands-inputları initialize et (sayfa yüklendiğinde)
+        document.querySelectorAll('.thousands-input').forEach(function(inp){
+            window.initThousandsInput(inp);
+        });
+
+        // Form submit: tüm formatlı alanları temizle
+        const form = container.closest('form');
+        if(form){
+            form.addEventListener('submit', function(){
+                form.querySelectorAll('.thousands-input').forEach(function(inp){
+                    let v = inp.value || '';
+                    v = v.replace(/\./g,''); // binlik ayracı kaldır
+                    v = v.replace(/,/g,'.'); // ondalık ayıracı nokta yap
+                    inp.value = v;
+                });
+            });
+        }
     });
 </script>
 {% endblock %}

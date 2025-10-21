@@ -232,67 +232,77 @@
                             {% endif %}
                             </div>
                     </div>
-                    {% else %}
-                    <div class="card mb-3 customer-card">
-                        <div class="card-header bg-light">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <strong class="me-3 customer-name"><i class="fa-solid fa-user text-muted"></i> {{ flat.customer_name }}</strong>
-                                    <small class="text-muted">{{ flat.flat_details }}</small>
+                    {% else %} {# Yani project.project_type == 'cooperative' #}
+                        <div class="card mb-3 customer-card">
+                            <div class="card-header bg-light">
+                                <div class="d-flex justify-content-between align-items-center flex-wrap"> {# flex-wrap eklendi #}
+                                    <div>
+                                        <strong class="me-3 customer-name"><i class="fa-solid fa-user text-muted"></i> {{ flat.customer_name }}</strong>
+                                        <small class="text-muted">{{ flat.flat_details }}</small>
+                                    </div>
+                                    <div class="mt-2 mt-md-0"> {# Mobil için margin eklendi #}
+                                        <span class="me-2 d-block d-md-inline text-center text-md-start"> {# Mobil için düzenleme #}
+                                            Toplam Katkı Payı:
+                                            <span class="badge bg-success fs-6">{{ flat.total_paid|thousands }} ₺</span>
+                                        </span>
+                                        
+                                        {# **** YENİ BUTON **** #}
+                                        {# project.project_id'yi kullanıyoruz #}
+                                        <a href="{{ url_for('new_payment', project_id=project.project_id, flat_id=flat.flat_id) }}" class="btn btn-sm btn-success me-1" title="Yeni Aidat/Katkı Ekle">
+                                            <i class="fa-solid fa-plus me-1"></i> Aidat Ekle
+                                        </a>
+                                        {# **** YENİ BUTON SONU **** #}
+
+                                        <button class="btn btn-outline-dark btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#coopDetails-{{ flat.flat_id }}">
+                                            Detay <i class="fa-solid fa-chevron-down small"></i>
+                                        </button>
+                                    </div>
                                 </div>
-                                <div>
-                                    <span class="me-2">Toplam Katkı Payı:</span>
-                                    <span class="badge bg-success fs-6 me-2">{{ flat.total_paid|thousands }} ₺</span>
-                                    <button class="btn btn-outline-dark btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#coopDetails-{{ flat.flat_id }}">
-                                        Detay <i class="fa-solid fa-chevron-down small"></i>
-                                    </button>
+                            </div>
+                            <div class="collapse" id="coopDetails-{{ flat.flat_id }}">
+                                <div class="card-body p-0">
+                                    {% if flat.payments %}
+                                    <div class="table-responsive">
+                                        <table class="table table-striped table-sm mb-0">
+                                            <thead>
+                                                <tr>
+                                                    <th>Ödeme Tarihi</th>
+                                                    <th>Açıklama</th>
+                                                    <th>Yöntem</th>
+                                                    <th class="text-end">Tutar</th>
+                                                    <th class="text-center">İşlemler</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for p_id, p_flat_id, p_date, p_desc, p_amount, p_method in flat.payments %}
+                                                <tr class="{% if p_method == 'çek' %}table-info{% endif %}">
+                                                    <td>{{ p_date.strftime('%d.%m.%Y') }}</td>
+                                                    <td>{{ p_desc }}</td>
+                                                    <td>
+                                                        {% if p_method == 'çek' %}
+                                                            <span class="badge bg-info text-dark"><i class="fa-solid fa-money-check-dollar me-1"></i> Çek</span>
+                                                        {% else %}
+                                                            <span class="badge bg-success"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
+                                                    <td class="text-center">
+                                                        <a href="{{ url_for('edit_payment', payment_id=p_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
+                                                        <form action="{{ url_for('delete_payment', payment_id=p_id) }}" method="POST" class="d-inline">
+                                                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu ödemeyi silerseniz, ilgili taksitlerin durumu yeniden hesaplanacaktır. Emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
+                                                        </form>
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {% else %}
+                                    <p class="text-center text-muted p-3">Bu üyeye ait ödeme kaydı bulunmuyor.</p>
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>
-                        <div class="collapse" id="coopDetails-{{ flat.flat_id }}">
-                            <div class="card-body p-0">
-                                {% if flat.payments %}
-                                <div class="table-responsive">
-                                    <table class="table table-striped table-sm mb-0">
-                                        <thead>
-                                            <tr>
-                                                <th>Ödeme Tarihi</th>
-                                                <th>Açıklama</th>
-                                                <th>Yöntem</th>
-                                                <th class="text-end">Tutar</th>
-                                                <th class="text-center">İşlemler</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {% for p_id, p_flat_id, p_date, p_desc, p_amount, p_method in flat.payments %}
-                                            <tr class="{% if p_method == 'çek' %}table-info{% endif %}">
-                                                <td>{{ p_date.strftime('%d.%m.%Y') }}</td>
-                                                <td>{{ p_desc }}</td>
-                                                <td>
-                                                    {% if p_method == 'çek' %}
-                                                        <span class="badge bg-info text-dark"><i class="fa-solid fa-money-check-dollar me-1"></i> Çek</span>
-                                                    {% else %}
-                                                        <span class="badge bg-success"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
-                                                    {% endif %}
-                                                </td>
-                                                <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
-                                                <td class="text-center">
-                                                    <a href="{{ url_for('edit_payment', payment_id=p_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
-                                                    <form action="{{ url_for('delete_payment', payment_id=p_id) }}" method="POST" class="d-inline">
-                                                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu ödemeyi silerseniz, ilgili taksitlerin durumu yeniden hesaplanacaktır. Emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
-                                                    </form>
-                                                </td>
-                                            </tr>
-                                            {% endfor %}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                {% else %}
-                                <p class="text-center text-muted p-3">Bu üyeye ait ödeme kaydı bulunmuyor.</p>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
                     {% endif %}
                 {% endfor %}
             </div>
