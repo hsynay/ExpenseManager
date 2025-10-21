@@ -5,6 +5,9 @@
 {% block extra_head %}
 <style>
     .summary-card h6 { font-size: 0.8rem; }
+    /* Sıralanabilir başlıklar için imleç */
+    th a { cursor: pointer; text-decoration: none; }
+    th a:hover { text-decoration: underline; }
 </style>
 {% endblock %}
 
@@ -21,7 +24,6 @@
     </div>
 </div>
 
-<!-- === YENİ VE DOĞRU ÖZET KARTI === -->
 <div class="card summary-card mb-4">
     <div class="card-body text-center p-3">
         <div class="row">
@@ -40,8 +42,6 @@
         </div>
     </div>
 </div>
-<!-- === ÖZET KARTI SONU === -->
-
 <form method="get" class="mb-4">
     <div class="row g-2 align-items-center">
         <div class="col-md-4">
@@ -61,30 +61,25 @@
         <h5 class="mb-0"><i class="fa-solid fa-arrow-down me-2"></i>Gerçekleşen Gelirler</h5>
     </div>
     <div class="card-body table-responsive p-0">
-        <!-- id eklendi: income-realized-table -->
         <table id="income-realized-table" class="table table-striped table-hover table-sm mb-0">
             <thead>
                 <tr>
-                    <!-- Tarih başlığı tıklanabilir, ikon ve dataset.order eklendi -->
                     <th>
                         <a id="income-sort-date" class="text-dark" data-order="asc" href="#">
                             Tarih <i class="fa-solid fa-sort" id="income-sort-date-icon"></i>
                         </a>
                     </th>
-                    <!-- Kimden başlığı tıklanabilir -->
                     <th>
                         <a id="income-sort-party" class="text-dark" data-order="asc" href="#">
                             Kimden <i class="fa-solid fa-sort" id="income-sort-party-icon"></i>
                         </a>
                     </th>
-                    <!-- Daire artık tıklanabilir -->
                     <th>
                         <a id="income-sort-flat" class="text-dark" data-order="asc" href="#">
                             Daire <i class="fa-solid fa-sort" id="income-sort-flat-icon"></i>
                         </a>
                     </th>
                     <th>Açıklama</th>
-                    <!-- Yöntem artık tıklanabilir -->
                     <th>
                         <a id="income-sort-method" class="text-dark" data-order="asc" href="#">
                             Yöntem <i class="fa-solid fa-sort" id="income-sort-method-icon"></i>
@@ -128,24 +123,20 @@
         <h5 class="mb-0"><i class="fa-solid fa-arrow-up me-2"></i>Gerçekleşen Giderler</h5>
     </div>
     <div class="card-body table-responsive p-0">
-        <!-- id eklendi: expense-realized-table -->
-        <table id="expense-realized-table" class="table table-striped table-hover table-sm mb-0">
+         <table id="expense-realized-table" class="table table-striped table-hover table-sm mb-0">
             <thead>
                 <tr>
-                    <!-- Tarih başlığı tıklanabilir -->
                     <th>
                         <a id="expense-sort-date" class="text-dark" data-order="asc" href="#">
                             Tarih <i class="fa-solid fa-sort" id="expense-sort-date-icon"></i>
                         </a>
                     </th>
                     <th>Başlık / Açıklama</th>
-                    <!-- Kime / Nereye başlığı tıklanabilir -->
                     <th>
                         <a id="expense-sort-party" class="text-dark" data-order="asc" href="#">
                             Kime / Nereye <i class="fa-solid fa-sort" id="expense-sort-party-icon"></i>
                         </a>
                     </th>
-                    <!-- Yöntem tıklanabilir -->
                     <th>
                         <a id="expense-sort-method" class="text-dark" data-order="asc" href="#">
                             Yöntem <i class="fa-solid fa-sort" id="expense-sort-method-icon"></i>
@@ -188,86 +179,137 @@
 </div>
 {% endif %}
 
-<!-- JavaScript: Tarih, metin, daire-no ve sayı (tutar) sütunları için istemci tarafı sıralama -->
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     // Yardımcı: dd.mm.yyyy -> Date
     function parseDateDMY(text) {
         var parts = (text || '').trim().split('.');
-        if (parts.length !== 3) return new Date(0);
+        if (parts.length !== 3) return new Date(0); // Geçersiz tarih için başlangıç tarihi
+        // Parçaları tamsayıya çevir: gün, ay (0-11 arası), yıl
         var d = parseInt(parts[0], 10), m = parseInt(parts[1], 10) - 1, y = parseInt(parts[2], 10);
+        // Yeni Date nesnesi oluştur
         return new Date(y, m, d);
     }
 
     // Para metnini sayıya çevir (ör: "1.234.567 ₺" -> 1234567)
     function parseAmount(text) {
         var s = (text || '').trim();
+        // Para birimi, boşluk gibi sayısal olmayan karakterleri kaldır
         s = s.replace(/[^\d\.,\-]/g, '');
+        // Binlik ayıracı olan noktaları kaldır, ondalık ayıracı olan virgülü nokta ile değiştir
         s = s.replace(/\./g, '').replace(/,/g, '.');
+        // Metni ondalık sayıya çevir
         var n = parseFloat(s);
+        // Eğer çevirme başarısız olursa 0 döndür, aksi halde sayıyı döndür
         return isNaN(n) ? 0 : n;
     }
 
-    // Daire hücresinden "No: X" veya "No X" şeklindeki numarayı ayıkla
+    // Daire hücresinden daire numarasını ayıkla (Örn: "Blok: A, Kat: 1, No: 5" -> 5)
     function parseFlatNumber(text) {
         var s = (text || '').trim();
-        var m = s.match(/No[:\s]*([0-9]+)/i);
-        if (m && m[1]) return parseInt(m[1], 10);
-        // alternatif: "No" olmayabilir, dene son "No:" yerine son sayı
-        var m2 = s.match(/(\d+)\s*$/);
-        if (m2 && m2[1]) return parseInt(m2[1], 10);
+        // "No: X" veya "No X" formatını ara
+        var match = s.match(/No[:\s]*(\d+)/i);
+        // Eğer eşleşme bulunursa ve sayı grubu varsa, sayıyı tamsayıya çevirip döndür
+        if (match && match[1]) {
+            return parseInt(match[1], 10);
+        }
+        // Alternatif: Satır sonundaki sayıyı bulmaya çalış (eğer "No:" yoksa)
+        var matchEnd = s.match(/(\d+)$/);
+        if (matchEnd && matchEnd[1]) {
+             return parseInt(matchEnd[1], 10);
+        }
+        // Hiçbir sayı bulunamazsa 0 döndür
         return 0;
     }
 
-    // Genel attach fonksiyonu: tableId, linkId, colIndex, type ('text'|'date'|'number'|'flat')
+    // Genel sıralama fonksiyonu: Tıklanan başlığa sıralama işlevi ekler
+    // linkId: Tıklanan başlık `<a>` etiketinin ID'si
+    // tableId: Sıralanacak tablonun ID'si
+    // colIndex: Sıralanacak sütunun indeksi (0'dan başlar)
+    // type: Sütun veri tipi ('date', 'number', 'flat', 'text')
     function attachSort(linkId, tableId, colIndex, type) {
-        var link = document.getElementById(linkId);
-        var table = document.getElementById(tableId);
+        var link = document.getElementById(linkId); // Başlık linkini al
+        var table = document.getElementById(tableId); // Tabloyu al
+        // Eğer link veya tablo bulunamazsa fonksiyondan çık
         if (!link || !table) return;
-        var icon = link.querySelector('i');
-        link.style.cursor = 'pointer';
+        var icon = link.querySelector('i'); // Sıralama ikonunu al
+
+        // Linke tıklandığında çalışacak fonksiyonu tanımla
         link.addEventListener('click', function (e) {
-            e.preventDefault();
-            var tbody = table.tBodies[0];
+            e.preventDefault(); // Linkin normal davranışını engelle (sayfa yenilemesini durdur)
+            var tbody = table.tBodies[0]; // Tablonun tbody bölümünü al
+            // Eğer tbody yoksa fonksiyondan çık
             if (!tbody) return;
+
+            // tbody içindeki tüm satırları (tr) alıp bir diziye dönüştür
             var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
-            var currentOrder = (link.dataset.order || 'asc').toLowerCase();
+            // Mevcut sıralama yönünü linkin 'data-order' özelliğinden al (varsayılan 'asc')
+            var currentOrder = link.dataset.order || 'asc';
+            // Yeni sıralama yönünü belirle (mevcut 'asc' ise 'desc' yap, değilse 'asc' yap)
             var newOrder = currentOrder === 'asc' ? 'desc' : 'asc';
 
+            // Satırları sırala
             rows.sort(function (a, b) {
-                var aCell = a.cells[colIndex] ? a.cells[colIndex].textContent.trim() : '';
-                var bCell = b.cells[colIndex] ? b.cells[colIndex].textContent.trim() : '';
-                var cmp = 0;
+                // İki satırın ilgili sütunlarındaki metin içeriklerini al
+                var aText = a.cells[colIndex] ? a.cells[colIndex].textContent.trim() : '';
+                var bText = b.cells[colIndex] ? b.cells[colIndex].textContent.trim() : '';
+                var comparison = 0; // Karşılaştırma sonucu (varsayılan 0)
+
+                // Veri tipine göre karşılaştırma yap
                 if (type === 'date') {
-                    cmp = parseDateDMY(aCell) - parseDateDMY(bCell);
+                    comparison = parseDateDMY(aText) - parseDateDMY(bText); // Tarihleri karşılaştır
                 } else if (type === 'number') {
-                    cmp = parseAmount(aCell) - parseAmount(bCell);
+                    comparison = parseAmount(aText) - parseAmount(bText); // Sayıları karşılaştır
                 } else if (type === 'flat') {
-                    cmp = parseFlatNumber(aCell) - parseFlatNumber(bCell);
+                    comparison = parseFlatNumber(aText) - parseFlatNumber(bText); // Daire numaralarını karşılaştır
                 } else { // 'text'
-                    cmp = aCell.localeCompare(bCell, 'tr');
+                    comparison = aText.localeCompare(bText, 'tr'); // Metinleri Türkçe karakter setine göre karşılaştır
                 }
-                return newOrder === 'asc' ? cmp : -cmp;
+                // Yeni sıralama yönüne göre sonucu ayarla ('desc' ise ters çevir)
+                return newOrder === 'asc' ? comparison : -comparison;
             });
 
-            rows.forEach(function (r) { tbody.appendChild(r); });
+            // Sıralanmış satırları tekrar tbody'ye ekle (bu işlem DOM'da sırayı günceller)
+            rows.forEach(function(row) {
+                tbody.appendChild(row);
+            });
+
+            // Linkin 'data-order' özelliğini yeni sıralama yönü ile güncelle
             link.dataset.order = newOrder;
+            // İkonun sınıfını yeni sıralama yönüne göre güncelle (yukarı/aşağı ok)
             if (icon) {
-                icon.className = newOrder === 'asc' ? 'fa-solid fa-sort-up' : 'fa-solid fa-sort-down';
+                icon.className = 'fa-solid ' + (newOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down');
             }
+
+            // Diğer tüm başlık ikonlarını varsayılan 'fa-sort' ikonuna döndür
+            var allHeaders = table.querySelectorAll('thead th a i');
+            allHeaders.forEach(function(otherIcon){
+                if(otherIcon !== icon) { // Şu anki ikon dışındakiler
+                    otherIcon.className = 'fa-solid fa-sort';
+                }
+            });
+             // Diğer tüm başlıkların data-order'ını sıfırla
+            var allLinks = table.querySelectorAll('thead th a');
+             allLinks.forEach(function(otherLink){
+                 if(otherLink !== link) {
+                     otherLink.dataset.order = 'asc'; // Veya varsayılan neyse o
+                 }
+             });
         });
     }
 
-    // Income table: Tarih (col 0, date), Kimden (col 1, text), Daire (col 2, flat), Yöntem (col 4, text), Tutar (col 5, number)
+    // Gelir Tablosu İçin Sıralama Fonksiyonlarını Çağır
+    // Parametreler: linkId, tableId, columnIndex, dataType
     attachSort('income-sort-date', 'income-realized-table', 0, 'date');
     attachSort('income-sort-party', 'income-realized-table', 1, 'text');
-    attachSort('income-sort-flat', 'income-realized-table', 2, 'flat');
+    attachSort('income-sort-flat', 'income-realized-table', 2, 'flat'); // Daire no için 'flat' tipi
     attachSort('income-sort-method', 'income-realized-table', 4, 'text');
     attachSort('income-sort-amount', 'income-realized-table', 5, 'number');
 
-    // Expense table: Tarih (col 0, date), Kime / Nereye (col 2, text), Yöntem (col 3, text), Tutar (col 4, number)
+    // Gider Tablosu İçin Sıralama Fonksiyonlarını Çağır
+    // Parametreler: linkId, tableId, columnIndex, dataType
     attachSort('expense-sort-date', 'expense-realized-table', 0, 'date');
-    attachSort('expense-sort-party', 'expense-realized-table', 2, 'text');
+    attachSort('expense-sort-party', 'expense-realized-table', 2, 'text'); // Kime/Nereye
     attachSort('expense-sort-method', 'expense-realized-table', 3, 'text');
     attachSort('expense-sort-amount', 'expense-realized-table', 4, 'number');
 });
