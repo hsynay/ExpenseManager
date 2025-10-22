@@ -1370,8 +1370,6 @@ def select_project_for_coop_report():
 
 # cooperative_report fonksiyonu
 
-# app.py içindeki cooperative_report fonksiyonunu bulun ve güncelleyin
-
 @app.route('/reports/cooperative/<int:project_id>/<int:year>/<int:month>')
 def cooperative_report(project_id, year, month):
     """Belirli bir kooperatif projesinin aylık finansal raporunu gösterir."""
@@ -1381,8 +1379,8 @@ def cooperative_report(project_id, year, month):
     conn = get_connection()
     cur = conn.cursor()
     report_data = {}
-    today = date.today() # Gider durumu için
 
+    # Türkçe ay isimleri için sözlük ---
     turkish_months = {
         1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs", 6: "Haziran",
         7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık"
@@ -1392,148 +1390,72 @@ def cooperative_report(project_id, year, month):
         start_date = date(year, month, 1)
         end_date = (start_date + relativedelta(months=1)) - relativedelta(days=1)
 
+        # Proje bilgilerini al
         cur.execute("SELECT name, total_flats FROM projects WHERE id = %s", (project_id,))
         project_info = cur.fetchone()
         report_data['project_name'] = project_info[0]
         
+        # Üye sayısını (sahibi olan daire sayısı) al
         cur.execute("SELECT COUNT(id) FROM flats WHERE project_id = %s AND owner_id IS NOT NULL", (project_id,))
         member_count = cur.fetchone()[0]
         report_data['member_count'] = member_count
 
-        # 1. Önceki Aydan Devreden Bakiye (Gerçekleşenlere göre)
-        cur.execute("SELECT COALESCE(SUM(p.amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id LEFT JOIN checks c ON p.check_id = c.id WHERE f.project_id = %s AND p.payment_date < %s AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')", (project_id, start_date))
+        # 1. Önceki Aydan Devreden Bakiyeyi Hesapla
+        cur.execute("""
+            SELECT COALESCE(SUM(amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id
+            WHERE f.project_id = %s AND p.payment_date < %s
+        """, (project_id, start_date))
         total_income_before = cur.fetchone()[0]
-        cur.execute("SELECT COALESCE(SUM(sp.amount), 0) FROM supplier_payments sp JOIN expenses e ON sp.expense_id = e.id LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id WHERE e.project_id = %s AND sp.payment_date < %s AND (sp.payment_method = 'nakit' OR oc.status = 'odendi')", (project_id, start_date))
+        
+        # Önceki aydan devreden giderler her iki tablodan toplanıyor
+        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s AND expense_date < %s", (project_id, start_date))
         total_large_expense_before = cur.fetchone()[0]
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s AND expense_date < %s", (project_id, start_date))
         total_petty_cash_before = cur.fetchone()[0]
         total_expense_before = total_large_expense_before + total_petty_cash_before
+        
         previous_balance = total_income_before - total_expense_before
         report_data['previous_balance'] = previous_balance
 
-        # 2. Bu Ayın Gerçekleşen Gelir ve Giderleri
-        cur.execute("SELECT COALESCE(SUM(p.amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id LEFT JOIN checks c ON p.check_id = c.id WHERE f.project_id = %s AND p.payment_date BETWEEN %s AND %s AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')", (project_id, start_date, end_date))
+        # 2. Bu Ayın Gelir ve Giderlerini Hesapla
+        cur.execute("""
+            SELECT COALESCE(SUM(amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id
+            WHERE f.project_id = %s AND p.payment_date BETWEEN %s AND %s
+        """, (project_id, start_date, end_date))
         current_income = cur.fetchone()[0]
         report_data['current_income'] = current_income
-        cur.execute("SELECT COALESCE(SUM(sp.amount), 0) FROM supplier_payments sp JOIN expenses e ON sp.expense_id = e.id LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id WHERE e.project_id = %s AND sp.payment_date BETWEEN %s AND %s AND (sp.payment_method = 'nakit' OR oc.status = 'odendi')", (project_id, start_date, end_date))
+        
+        # Rapor ayına ait giderler her iki tablodan toplanıyor
+        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
         current_large_expense = cur.fetchone()[0]
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
         current_petty_cash_expense = cur.fetchone()[0]
         current_expense = current_large_expense + current_petty_cash_expense
         report_data['current_expense'] = current_expense
         
-        # 3. Ay Sonu Bakiyesi
+        # 3. Ay Sonu Bakiyesini Hesapla
         end_of_month_balance = previous_balance + current_income - current_expense
         report_data['end_of_month_balance'] = end_of_month_balance
 
-        # --- 4. Detaylı Listeler ---
-
-        # Gelir Detayları (Geliştirilmiş Sorgu)
+        # 4. Detaylı listeler için verileri çek
         cur.execute("""
-            SELECT 
-                p.payment_date, 
-                c.first_name || ' ' || c.last_name AS customer_name,
-                f.block_name, f.floor, f.flat_no,
-                p.description, p.amount, p.payment_method,
-                chk.status AS check_status
+            SELECT p.payment_date, c.first_name || ' ' || c.last_name, p.description, p.amount 
             FROM payments p 
             JOIN flats f ON p.flat_id = f.id 
             JOIN customers c ON f.owner_id = c.id
-            LEFT JOIN checks chk ON p.check_id = chk.id
-            WHERE f.project_id = %s AND p.payment_date BETWEEN %s AND %s 
-            ORDER BY p.payment_date, p.id
+            WHERE f.project_id = %s AND p.payment_date BETWEEN %s AND %s ORDER BY p.payment_date
         """, (project_id, start_date, end_date))
-        income_details_raw = cur.fetchall()
-        income_details = []
-        for row in income_details_raw:
-            # Durumu ve CSS sınıfını belirle
-            method = row[7]
-            check_status = row[8]
-            status_text = ""
-            status_class = ""
-            if method == 'çek':
-                if check_status == 'portfoyde': status_text, status_class = "Portföyde", "warning"
-                elif check_status == 'tahsil_edildi': status_text, status_class = "Tahsil Edildi", "success"
-                elif check_status == 'karsiliksiz': status_text, status_class = "Karşılıksız", "danger"
-                else: status_text, status_class = "Bilinmiyor", "secondary"
-            else: # Nakit
-                 status_text, status_class = "Ödendi", "success"
-                 
-            income_details.append({
-                'date': row[0],
-                'customer': row[1],
-                'flat': f"Blok: {row[2] or 'N/A'}, K:{row[3]}, N:{row[4]}",
-                'description': row[5],
-                'amount': row[6],
-                'method': method,
-                'status_text': status_text,
-                'status_class': status_class
-            })
+        income_details = cur.fetchall()
         report_data['income_details'] = income_details
 
-        # Gider Detayları (Geliştirilmiş Sorgular)
-        expense_details = []
-        # Büyük Giderler (Gerçekleşen Ödemeler)
-        cur.execute("""
-            SELECT 
-                sp.payment_date, e.title, s.name AS supplier_name, sp.description,
-                sp.amount, sp.payment_method, oc.status AS check_status
-            FROM supplier_payments sp
-            JOIN expenses e ON sp.expense_id = e.id
-            LEFT JOIN suppliers s ON e.supplier_id = s.id
-            LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
-            WHERE e.project_id = %s AND sp.payment_date BETWEEN %s AND %s
-            ORDER BY sp.payment_date, sp.id
-        """, (project_id, start_date, end_date))
-        large_expense_payments = cur.fetchall()
-        for row in large_expense_payments:
-            method = row[5]
-            check_status = row[6]
-            status_text = ""
-            status_class = ""
-            if method == 'çek':
-                if check_status == 'verildi': status_text, status_class = "Verildi", "warning"
-                elif check_status == 'odendi': status_text, status_class = "Ödendi", "success"
-                elif check_status == 'karsiliksiz': status_text, status_class = "Karşılıksız", "danger"
-                else: status_text, status_class = "Bilinmiyor", "secondary"
-            else: # Nakit
-                status_text, status_class = "Ödendi", "success"
-                
-            expense_details.append({
-                'date': row[0],
-                'type': 'Büyük Gider',
-                'title': row[1],
-                'supplier': row[2] or '-',
-                'description': row[3],
-                'amount': row[4],
-                'method': method,
-                'status_text': status_text,
-                'status_class': status_class
-            })
-
-        # Küçük Nakit Giderler
-        cur.execute("""
-            SELECT expense_date, title, description, amount 
-            FROM petty_cash_expenses 
-            WHERE project_id = %s AND expense_date BETWEEN %s AND %s
-            ORDER BY expense_date, id
-        """, (project_id, start_date, end_date))
-        petty_cash_details_raw = cur.fetchall()
-        for row in petty_cash_details_raw:
-            expense_details.append({
-                'date': row[0],
-                'type': 'Küçük Gider',
-                'title': row[1],
-                'supplier': 'Kasa', # Küçük giderler kasadan çıkar
-                'description': row[2],
-                'amount': row[3],
-                'method': 'nakit',
-                'status_text': 'Ödendi',
-                'status_class': 'success'
-            })
+        # Gider detayları listesi her iki tablodan birleştirilip tarihe göre sıralanıyor
+        cur.execute("SELECT expense_date, title, description, amount FROM expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
+        large_expense_details = cur.fetchall()
+        cur.execute("SELECT expense_date, title, description, amount FROM petty_cash_expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
+        petty_cash_details = cur.fetchall()
         
-        # Tüm giderleri tarihe göre sırala
-        expense_details.sort(key=lambda x: x['date']) 
+        expense_details = large_expense_details + petty_cash_details
+        expense_details.sort(key=lambda x: x[0]) 
         report_data['expense_details'] = expense_details
         
         month_name = turkish_months.get(start_date.month, "")
@@ -1541,9 +1463,6 @@ def cooperative_report(project_id, year, month):
 
     except Exception as e:
         flash(f"Rapor oluşturulurken bir hata oluştu: {e}", "danger")
-        # Hata durumunda boş listeler ata
-        report_data['income_details'] = []
-        report_data['expense_details'] = []
     finally:
         cur.close()
         conn.close()
@@ -1690,10 +1609,6 @@ def project_overview(project_id):
             cur.execute("SELECT COALESCE(SUM(s.amount), 0) FROM installment_schedule s JOIN flats f ON s.flat_id = f.id WHERE f.project_id = %s", (project_id,))
             total_planned_income = cur.fetchone()[0]
             total_unpaid_income = total_planned_income - total_paid_income
-        elif project_type == 'cooperative':
-            cur.execute("SELECT COALESCE(SUM(p.amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id WHERE f.project_id = %s", (project_id,))
-            total_paid_income = cur.fetchone()[0]
-            total_unpaid_income = 0
         
         cur.execute("SELECT COALESCE(SUM(sp.amount), 0) FROM supplier_payments sp JOIN expenses e ON sp.expense_id = e.id LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id WHERE e.project_id = %s AND (sp.payment_method = 'nakit' OR oc.status = 'odendi')", (project_id,))
         paid_large_expenses = cur.fetchone()[0]
@@ -1702,12 +1617,9 @@ def project_overview(project_id):
         total_paid_expense = paid_large_expenses + paid_petty_cash
         cur.execute("SELECT COALESCE(SUM(es.amount), 0) FROM expense_schedule es JOIN expenses e ON es.expense_id = e.id WHERE e.project_id = %s", (project_id,))
         total_planned_large_expense = cur.fetchone()[0]
-        # Küçük giderler planlanmadığı için planlanan gidere eklenmez ama ödenmişe eklenir. Kalan borç hesabı için düzeltme:
-        total_planned_expenses_for_summary = total_planned_large_expense + paid_petty_cash # Özet kart için toplam plan + gerçekleşen küçükler
-        total_unpaid_expense = total_planned_expenses_for_summary - total_paid_expense # Özet kart için kalan borç
+        total_unpaid_expense = (total_planned_large_expense + paid_petty_cash) - total_paid_expense
 
-
-        # --- GELİR TABLOSU VERİLERİ ---
+        # --- GELİR TABLOSU VERİLERİ (Önceki doğru haliyle) ---
         if project_type == 'normal':
             income_query = """
                 WITH flat_payment_summary AS (
@@ -1738,84 +1650,68 @@ def project_overview(project_id):
                     if cumulative_amount <= total_cash: status, status_class, payment_method = "Ödendi", "bg-success", "nakit"
                     elif cumulative_amount <= total_cleared_payments: status, status_class, payment_method = "Ödendi", "bg-success", "çek"
                     else: status, status_class, payment_method = "Çek Portföyde", "bg-warning text-dark", "çek"
-                elif paid_this_installment > 0: status, status_class, payment_method = "Kısmen Ödendi", "bg-info text-dark", None
-                else: status, status_class, payment_method = ("Gecikmiş", "bg-danger") if due_date < today else ("Bekleniyor", "bg-secondary"), None
+                elif paid_this_installment > 0: 
+                    status, status_class = "Kısmen Ödendi", "bg-info text-dark"
+                    payment_method = None # Ödenmemişse yöntem olmaz
+                else: 
+                    status, status_class = ("Gecikmiş", "bg-danger") if due_date < today else ("Bekleniyor", "bg-secondary")
+                    payment_method = None # Ödenmemişse yöntem olmaz
                 income_items.append({'date': due_date, 'description': "Daire Satış Taksiti", 'party': f"{first} {last}", 'details': f"Blok: {block or 'N/A'}, Kat: {floor}, No: {flat_no}", 'amount': amount, 'status': status, 'status_class': status_class, 'payment_method': payment_method})
-        elif project_type == 'cooperative':
-            coop_income_query = """
-                SELECT p.payment_date, p.amount, p.description, p.payment_method, c.first_name, c.last_name, f.block_name, f.floor, f.flat_no, chk.status AS check_status
-                FROM payments p JOIN flats f ON p.flat_id = f.id JOIN customers c ON f.owner_id = c.id LEFT JOIN checks chk ON p.check_id = chk.id
-                WHERE f.project_id = %s ORDER BY p.payment_date DESC
-            """
-            cur.execute(coop_income_query, (project_id,))
-            for row in cur.fetchall():
-                payment_date, amount, description, payment_method, first, last, block, floor, flat_no, check_status = row
-                if payment_method == 'çek':
-                    if check_status == 'portfoyde': status, status_class = "Çek Portföyde", "bg-warning text-dark"
-                    elif check_status == 'tahsil_edildi': status, status_class = "Tahsil Edildi", "bg-success"
-                    elif check_status == 'karsiliksiz': status, status_class = "Karşılıksız Çek", "bg-danger"
-                    else: status, status_class = "Bilinmiyor", "bg-secondary"
-                else: status, status_class = "Ödendi", "bg-success"
-                income_items.append({'date': payment_date, 'description': description or "Üye Katkı Payı", 'party': f"{first} {last}", 'details': f"Blok: {block or 'N/A'}, Kat: {floor}, No: {flat_no}", 'amount': amount, 'status': status, 'status_class': status_class, 'payment_method': payment_method})
-
-        # --- GİDER TABLOSU VERİLERİ (İSTENEN ÖNCEKİ HALİNE DÖNDÜRÜLDÜ) ---
-        # Tüm planlanmış gider taksitlerini ve son ödeme bilgisini çek
+        
+        # --- GİDER TABLOSU VERİLERİ (DÜZELTİLMİŞ MANTIK İLE) ---
         expense_query = """
-             SELECT 
-                 s.due_date, s.amount, s.paid_amount, s.is_paid, 
-                 e.title, sup.name,
-                 p.payment_method, -- Son ödemenin yöntemi
-                 oc.status as check_status -- Son ödeme çek ise durumu
-             FROM expense_schedule s
-             JOIN expenses e ON s.expense_id = e.id
-             LEFT JOIN suppliers sup ON e.supplier_id = sup.id
-             -- Son ödemeyi bulmak için LATERAL JOIN
-             LEFT JOIN LATERAL (
-                 SELECT * FROM supplier_payments 
-                 WHERE supplier_payments.expense_id = s.expense_id 
-                 ORDER BY supplier_payments.payment_date DESC, supplier_payments.id DESC 
-                 LIMIT 1
-             ) p ON TRUE
-             LEFT JOIN outgoing_checks oc ON p.check_id = oc.id
-             WHERE e.project_id = %s
-         """
-        cur.execute(expense_query, (project_id,))
+            WITH expense_payment_summary AS (
+                SELECT sp.expense_id,
+                       COALESCE(SUM(sp.amount) FILTER (WHERE sp.payment_method = 'nakit'), 0) as total_cash,
+                       COALESCE(SUM(sp.amount) FILTER (WHERE sp.payment_method = 'çek' AND oc.status = 'odendi'), 0) as total_cleared_check,
+                       COALESCE(SUM(sp.amount) FILTER (WHERE sp.payment_method = 'çek' AND oc.status = 'verildi'), 0) as total_portfolio_check
+                FROM supplier_payments sp
+                LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
+                JOIN expenses e ON sp.expense_id = e.id WHERE e.project_id = %s
+                GROUP BY sp.expense_id
+            ),
+            cumulative_expense_installments AS (
+                SELECT id, expense_id, amount,
+                       SUM(amount) OVER (PARTITION BY expense_id ORDER BY due_date, id) as cumulative_amount
+                FROM expense_schedule
+            )
+            SELECT s.due_date, cei.amount, e.title, sup.name,
+                   COALESCE(eps.total_cash, 0), COALESCE(eps.total_cleared_check, 0),
+                   COALESCE(eps.total_portfolio_check, 0), cei.cumulative_amount
+            FROM expense_schedule s
+            JOIN expenses e ON s.expense_id = e.id
+            LEFT JOIN suppliers sup ON e.supplier_id = sup.id
+            LEFT JOIN expense_payment_summary eps ON s.expense_id = eps.expense_id
+            JOIN cumulative_expense_installments cei ON s.id = cei.id
+            WHERE e.project_id = %s
+        """
+        cur.execute(expense_query, (project_id, project_id))
         for row in cur.fetchall():
-            due_date, amount, paid_amount, is_paid, title, sup_name, last_payment_method, check_status = row
-            paid_amount = paid_amount or Decimal(0)
-
-            # Durumu belirle
-            if is_paid:
-                status, status_class = "Ödendi", "bg-success"
-            elif paid_amount > 0:
+            due_date, amount, title, sup_name, total_cash, total_cleared_check, total_portfolio_check, cumulative_amount = row
+            
+            total_cleared_payments = total_cash + total_cleared_check
+            total_valid_payments = total_cleared_payments + total_portfolio_check
+            paid_so_far = max(0, total_valid_payments - (cumulative_amount - amount))
+            paid_this_installment = min(amount, paid_so_far)
+            
+            # *** HATANIN ÇÖZÜMÜ BURADA ***
+            if paid_this_installment >= amount: # Taksit tam ödenmiş
+                if cumulative_amount <= total_cash: 
+                    status, status_class, payment_method = "Ödendi", "bg-success", "nakit"
+                elif cumulative_amount <= total_cleared_payments: 
+                    status, status_class, payment_method = "Ödendi", "bg-success", "çek"
+                else: 
+                    status, status_class, payment_method = "Çek Verildi", "bg-warning text-dark", "çek"
+            elif paid_this_installment > 0: # Kısmen ödenmiş
                 status, status_class = "Kısmen Ödendi", "bg-info text-dark"
-            elif due_date < today:
-                status, status_class = "Gecikmiş", "bg-danger"
-            else:
-                status, status_class = "Bekleniyor", "bg-secondary"
+                payment_method = None # Düzeltme: Yöntemi sıfırla
+            else: # Hiç ödenmemiş
+                status, status_class = ("Gecikmiş", "bg-danger") if due_date < today else ("Bekleniyor", "bg-secondary")
+                payment_method = None # Düzeltme: Yöntemi sıfırla
+                
+            expense_items.append({'date': due_date, 'description': title, 'party': sup_name or "Belirtilmemiş", 'details': 'Planlı Gider', 'amount': amount, 'status': status, 'status_class': status_class, 'payment_method': payment_method})
 
-            # Ödeme yöntemini belirle (Sadece tamamen veya kısmen ödenmişse ve son ödeme varsa göster)
-            display_method = None
-            if is_paid or paid_amount > 0:
-                 # Eğer son ödeme çek ise ve hala portföydeyse durumu özel belirt
-                 if last_payment_method == 'çek' and check_status == 'verildi':
-                      status, status_class = "Çek Verildi", "bg-warning text-dark" # Ödendi yerine bunu göster
-                      display_method = 'çek' # Yöntem yine de çek
-                 else:
-                     display_method = last_payment_method # Son ödeme nakitse veya çek ödenmişse
-
-            expense_items.append({
-                'date': due_date, 
-                'description': title, 
-                'party': sup_name or "Belirtilmemiş",
-                'details': 'Planlı Gider', 
-                'amount': amount, 
-                'status': status,
-                'status_class': status_class, 
-                'payment_method': display_method # Hesaplanan yöntemi kullan
-            })
-
-        # Küçük Nakit Giderleri Ekle
+        # Küçük Nakit Giderler
         cur.execute("SELECT expense_date, title, amount, description FROM petty_cash_expenses WHERE project_id = %s", (project_id,))
         for expense_date, title, amount, desc in cur.fetchall():
             expense_items.append({'date': expense_date, 'description': title, 'party': 'Kasa', 'details': desc or 'Küçük Gider', 'amount': amount, 'status': 'Ödendi', 'status_class': 'bg-success', 'payment_method': 'nakit'})
@@ -1833,10 +1729,8 @@ def project_overview(project_id):
         # Sıralama
         is_reverse = (order == 'desc')
         key_to_sort = 'party' if sort_by == 'party' else 'date'
-        # Gelir ve Gider listelerini ayrı ayrı sırala
         income_items.sort(key=lambda x: x.get(key_to_sort, today if key_to_sort == 'date' else ''), reverse=is_reverse)
-        expense_items.sort(key=lambda x: x.get('date', today), reverse=is_reverse) # Giderleri her zaman tarihe göre sırala (şimdilik)
-
+        expense_items.sort(key=lambda x: x.get('date', today), reverse=is_reverse)
 
     except Exception as e:
         flash(f"Proje genel bakışı oluşturulurken hata: {e}", "danger")
@@ -1844,7 +1738,9 @@ def project_overview(project_id):
         cur.close()
         conn.close()
     
-    return render_template('project_overview.html', project_id=project_id, project_name=project_name, income_items=income_items, expense_items=expense_items, total_paid_income=total_paid_income, total_unpaid_income=total_unpaid_income, total_paid_expense=total_paid_expense, total_unpaid_expense=total_unpaid_expense, user_name=session.get('user_name'), project_type=project_type, start_date=start_date_str, end_date=end_date_str, sort_by=sort_by, order=order)
+    return render_template('project_overview.html', project_id=project_id, project_name=project_name, 
+    income_items=income_items, expense_items=expense_items, total_paid_income=total_paid_income, total_unpaid_income=total_unpaid_income, total_paid_expense=total_paid_expense, total_unpaid_expense=total_unpaid_expense, user_name=session.get('user_name'), project_type=project_type, start_date=start_date_str, end_date=end_date_str, sort_by=sort_by, order=order)
+
 
 # list_expenses fonksiyonu
 
