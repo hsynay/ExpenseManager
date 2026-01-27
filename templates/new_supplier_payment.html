@@ -62,8 +62,67 @@
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // --- 1. Tarih Başlatma ---
         const today = new Date().toISOString().split('T')[0];
-        document.getElementById('payment_date').value = today;
+        const paymentDateInput = document.getElementById('payment_date');
+        if (paymentDateInput && !paymentDateInput.value) {
+            paymentDateInput.value = today;
+        }
+
+        // --- 2. Sayı Formatlama Mantığı (Global) ---
+        window.formatInputValue = function(raw) {
+            if (!raw) return '';
+            // Boşlukları temizle
+            raw = String(raw).replace(/\s/g, '');
+            
+            let parts = raw.split(',');
+            let intPart = parts[0].replace(/\D/g, ''); // Sayı dışındaki her şeyi (noktalar dahil) temizle
+            let fracPart = parts.length > 1 ? parts[1].replace(/\D/g, '') : '';
+
+            if (intPart === '' && fracPart === '') return '';
+            if (intPart === '') intPart = '0';
+
+            // Binlik ayraçlarını (nokta) ekle
+            intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+            // Varsa kuruş kısmını (virgül ile) geri ekle
+            return parts.length > 1 ? intPart + ',' + fracPart : intPart;
+        };
+
+        window.initThousandsInput = function(inputEl) {
+            if (!inputEl) return;
+            inputEl.addEventListener('input', function(e) {
+                const el = e.target;
+                const pos = el.selectionStart;
+                const oldLen = el.value.length;
+                
+                el.value = window.formatInputValue(el.value);
+                
+                // İmleç (cursor) konumunu koru
+                const newLen = el.value.length;
+                const diff = newLen - oldLen;
+                el.setSelectionRange(pos + diff, pos + diff);
+            });
+        };
+
+        // --- 3. Formatlamayı Başlat ---
+        const amountInput = document.getElementById('amount');
+        if (amountInput) {
+            window.initThousandsInput(amountInput);
+        }
+
+        // --- 4. Form Submit: Veriyi Temizle (1.234,56 -> 1234.56) ---
+        const form = document.querySelector('form');
+        if (form) {
+            form.addEventListener('submit', function() {
+                const thousandsInputs = this.querySelectorAll('.thousands-input');
+                thousandsInputs.forEach(function(inp) {
+                    let v = inp.value || '';
+                    // Noktaları sil, virgülü noktaya çevir
+                    inp.value = v.replace(/\./g, '').replace(',', '.');
+                });
+            });
+        }
     });
 </script>
 {% endblock %}

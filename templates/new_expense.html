@@ -31,20 +31,10 @@
                         </div>
                     </div>
 
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Gider Tipi (*)</label>
-                        <div class="form-check"><input class="form-check-input" type="radio" name="expense_type" id="singleExpenseRadio" value="tek_sefer" checked><label class="form-check-label" for="singleExpenseRadio">Tek Seferlik Gider</label></div>
-                        <div class="form-check"><input class="form-check-input" type="radio" name="expense_type" id="plannedExpenseRadio" value="planli"><label class="form-check-label" for="plannedExpenseRadio">Taksitli Gider Planı</label></div>
-                    </div>
-
-                    <div id="singleExpenseFields" class="mb-3">
-                        <label for="single_amount" class="form-label">Toplam Tutar (₺) (*)</label>
-                        <input type="text" class="form-control thousands-input" id="single_amount" name="single_amount" required>
-                    </div>
-
-                    <div id="plannedExpenseFields" style="display: none;" class="border p-3 rounded-3 mb-3">
-                        <h6 class="mb-3">Ödeme Planı Taksitleri</h6>
-                        <div id="installments-container"></div>
+                    <div id="plannedExpenseFields" class="border p-3 rounded-3 mb-3">
+                        <h6 class="fw-bold mb-3"><i class="fa-solid fa-calendar-days me-2"></i>Ödeme Planı ve Taksitler</h6>
+                        <div id="installments-container">
+                            </div>
                         <button type="button" id="add-installment-btn" class="btn btn-sm btn-outline-success mt-2"><i class="fa-solid fa-plus me-1"></i> Taksit Ekle</button>
                     </div>
 
@@ -63,11 +53,37 @@
     </div>
 </div>
 {% endblock %}
+
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // ... (sayfanızdaki mevcut diğer scriptler aynı kalacak) ...
-        // Tedarikçi alanlarını yönet
+        // --- 1. Sayı Formatlama Fonksiyonları ---
+        window.formatInputValue = function(raw) {
+            if (!raw) return '';
+            raw = String(raw).replace(/\s/g, '');
+            let parts = raw.split(',');
+            let intPart = parts[0].replace(/\D/g, ''); 
+            let fracPart = parts.length > 1 ? parts[1].replace(/\D/g, '') : '';
+            if (intPart === '' && fracPart === '') return '';
+            if (intPart === '') intPart = '0';
+            intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            return parts.length > 1 ? intPart + ',' + fracPart : intPart;
+        };
+
+        window.initThousandsInput = function(inputEl) {
+            if (!inputEl) return;
+            inputEl.addEventListener('input', function(e) {
+                const el = e.target;
+                const pos = el.selectionStart;
+                const oldLen = el.value.length;
+                el.value = window.formatInputValue(el.value);
+                const newLen = el.value.length;
+                const diff = newLen - oldLen;
+                el.setSelectionRange(pos + diff, pos + diff);
+            });
+        };
+
+        // --- 2. Tedarikçi Yönetimi ---
         const existingSupplierRadio = document.getElementById('existingSupplierRadio');
         const newSupplierRadio = document.getElementById('newSupplierRadio');
         const existingSupplierFields = document.getElementById('existingSupplierFields');
@@ -84,25 +100,10 @@
         newSupplierRadio.addEventListener('change', toggleSupplierFields);
         toggleSupplierFields();
 
-        // Gider tipi alanlarını yönet
-        const singleExpenseRadio = document.getElementById('singleExpenseRadio');
-        const plannedExpenseRadio = document.getElementById('plannedExpenseRadio');
-        const singleExpenseFields = document.getElementById('singleExpenseFields');
-        const plannedExpenseFields = document.getElementById('plannedExpenseFields');
-
-        function toggleExpenseFields() {
-            const isSingle = singleExpenseRadio.checked;
-            singleExpenseFields.style.display = isSingle ? 'block' : 'none';
-            plannedExpenseFields.style.display = isSingle ? 'none' : 'block';
-            singleExpenseFields.querySelector('input').required = isSingle;
-        }
-        singleExpenseRadio.addEventListener('change', toggleExpenseFields);
-        plannedExpenseRadio.addEventListener('change', toggleExpenseFields);
-        toggleExpenseFields();
-
-        // Taksit satırı ekleme
+        // --- 3. Taksit Yönetimi ---
         const container = document.getElementById('installments-container');
-        document.getElementById('add-installment-btn').addEventListener('click', function() {
+        
+        function addRow() {
             const newRow = document.createElement('div');
             newRow.classList.add('row', 'g-2', 'mb-2', 'align-items-center', 'installment-row');
             newRow.innerHTML = `
@@ -111,20 +112,33 @@
                 <div class="col-sm-1"><button type="button" class="btn btn-sm btn-danger w-100 remove-row"><i class="fa-solid fa-trash-alt"></i></button></div>
             `;
             container.appendChild(newRow);
+            const newInput = newRow.querySelector('.thousands-input');
+            if (newInput) window.initThousandsInput(newInput);
+        }
 
-            // YENİ EKLENEN KISIM:
-            // Yeni oluşturulan satırdaki '.thousands-input' kutucuğunu bul.
-            const newThousandsInput = newRow.querySelector('.thousands-input');
-            // Eğer varsa ve global fonksiyonumuz mevcutsa, formatlamayı bu yeni kutucuk için de başlat.
-            if (newThousandsInput && typeof window.initThousandsInput === 'function') {
-                window.initThousandsInput(newThousandsInput);
-            }
-        });
+        document.getElementById('add-installment-btn').addEventListener('click', addRow);
 
         container.addEventListener('click', function(e) {
             if (e.target.closest('.remove-row')) {
-                e.target.closest('.installment-row').remove();
+                // En az bir satır kalmasını garanti edelim
+                if (container.querySelectorAll('.installment-row').length > 1) {
+                    e.target.closest('.installment-row').remove();
+                } else {
+                    alert("En az bir ödeme kalemi girilmelidir.");
+                }
             }
+        });
+
+        // Sayfa açıldığında boş bir satır ekle
+        addRow();
+
+        // --- 4. Form Submit: Temizlik ---
+        const form = document.querySelector('form');
+        form.addEventListener('submit', function() {
+            form.querySelectorAll('.thousands-input').forEach(function(inp) {
+                let v = inp.value || '';
+                inp.value = v.replace(/\./g, '').replace(',', '.'); 
+            });
         });
     });
 </script>

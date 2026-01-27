@@ -91,6 +91,51 @@
             </table>
         </section>
 
+        <section class="mt-5">
+            <h4 class="mb-3 fw-bold">Ödeme Kayıtları</h4>
+            {% if data.payments %}
+            <table class="table table-bordered">
+                <thead class="table-light">
+                    <tr>
+                        <th class="text-center">Tarih</th>
+                        <th>Açıklama / Çek Detayı</th>
+                        <th class="text-center">Yöntem</th>
+                        <th class="text-end">Tutar</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in data.payments %}
+                    <tr>
+                        <td class="text-center">{{ p.payment_date.strftime('%d.%m.%Y') if p.payment_date else '-' }}</td>
+                        <td>
+                            {{ p.description or '' }}
+                            {% if p.method == 'çek' %}
+                                <div class="small text-muted mt-1">
+                                    <strong>Banka:</strong> {{ p.bank or '-' }} |
+                                    <strong>No:</strong> {{ p.check_number or '-' }} |
+                                    <strong>Vade:</strong> {{ p.check_due.strftime('%d.%m.%Y') if p.check_due else '-' }}
+                                </div>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if p.method == 'çek' %}
+                                <span class="badge {% if p.check_status == 'tahsil_edildi' %} bg-success {% elif p.check_status == 'karsiliksiz' %} bg-danger {% else %} bg-warning text-dark {% endif %}">
+                                    Çek {{ p.check_status|replace('_', ' ')|capitalize if p.check_status else '' }}
+                                </span>
+                            {% else %}
+                                <span class="badge bg-primary">Nakit</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end fw-bold">{{ p.amount|thousands }} ₺</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+                <p class="text-muted">Bu daire için kayıtlı ödeme bulunmuyor.</p>
+            {% endif %}
+        </section>
+
         <footer class="text-center text-muted mt-5">
             <p><small>Bu belge, Konak İnşaat Proje Yönetim Sistemi tarafından otomatik olarak bilgilendirme amacıyla oluşturulmuştur.</small></p>
         </footer>

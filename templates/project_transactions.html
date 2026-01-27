@@ -43,14 +43,66 @@
     </div>
 </div>
 <form method="get" class="mb-4">
-    <div class="row g-2 align-items-center">
-        <div class="col-md-4">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-3">
             <label class="form-label fw-bold mb-1">Görüntüle:</label>
             <select name="view" class="form-select" onchange="this.form.submit()">
                 <option value="all" {% if view_type == 'all' %}selected{% endif %}>Tümü (Gerçekleşen Gelir ve Giderler)</option>
                 <option value="income" {% if view_type == 'income' %}selected{% endif %}>Sadece Gerçekleşen Gelirler</option>
                 <option value="expense" {% if view_type == 'expense' %}selected{% endif %}>Sadece Gerçekleşen Giderler</option>
             </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label fw-bold mb-1">Başlangıç Tarihi</label>
+            <input type="date" name="start_date" class="form-control" value="{{ start_date or '' }}">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label fw-bold mb-1">Bitiş Tarihi</label>
+            <input type="date" name="end_date" class="form-control" value="{{ end_date or '' }}">
+        </div>
+        <span></span>
+
+        <div class="col-md-3">
+            <label class="form-label fw-bold mb-1">Gelir - Kimden</label>
+            <select name="income_party" class="form-select">
+                <option value="">Tümü</option>
+                {% for p in income_parties %}
+                <option value="{{ p }}" {% if income_party==p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label fw-bold mb-1">Gelir - Yöntem</label>
+            <select name="income_method" class="form-select">
+                <option value="all" {% if income_method=='all' %}selected{% endif %}>Tümü</option>
+                <option value="nakit" {% if income_method=='nakit' %}selected{% endif %}>Nakit</option>
+                <option value="çek" {% if income_method=='çek' %}selected{% endif %}>Çek</option>
+            </select>
+        </div>
+
+        <span></span>
+        <div class="col-md-3">
+            <label class="form-label fw-bold mb-1">Gider - Kime</label>
+            <select name="expense_party" class="form-select">
+                <option value="">Tümü</option>
+                {% for p in expense_parties %}
+                <option value="{{ p }}" {% if expense_party==p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="col-md-2">
+            <label class="form-label fw-bold mb-1">Gider - Yöntem</label>
+            <select name="expense_method" class="form-select">
+                <option value="all" {% if expense_method=='all' %}selected{% endif %}>Tümü</option>
+                <option value="nakit" {% if expense_method=='nakit' %}selected{% endif %}>Nakit</option>
+                <option value="çek" {% if expense_method=='çek' %}selected{% endif %}>Çek</option>
+            </select>
+        </div>
+
+        <div class="col-md-3 d-flex gap-2">
+            <button type="submit" class="btn btn-primary flex-fill"><i class="fa-solid fa-filter me-1"></i>Filtrele</button>
+            <a href="{{ url_for('project_transactions', project_id=project_id) }}" class="btn btn-outline-secondary flex-fill"><i class="fa-solid fa-refresh me-1"></i>Temizle</a>
         </div>
     </div>
 </form>
@@ -93,20 +145,20 @@
                 </tr>
             </thead>
             <tbody>
-                {% for date, desc, amount, method, first, last, block, floor, flat_no in income_data %}
+                {% for inc in income_data %}
                 <tr>
-                    <td>{{ date.strftime('%d.%m.%Y') }}</td>
-                    <td>{{ (first or '') ~ ' ' ~ (last or '') }}</td>
-                    <td>Blok: {{ block or 'N/A' }}, Kat: {{ floor }}, No: {{ flat_no }}</td>
-                    <td>{{ desc or '-' }}</td>
+                    <td>{{ inc.date.strftime('%d.%m.%Y') }}</td>
+                    <td>{{ inc.party }}</td>
+                    <td>{{ inc.details }}</td>
+                    <td>{{ inc.desc or '-' }}</td>
                     <td>
-                        {% if method == 'çek' %}
+                        {% if inc.method == 'çek' %}
                             <span class="badge bg-info text-dark"><i class="fa-solid fa-money-check-dollar me-1"></i> Çek</span>
                         {% else %}
                             <span class="badge bg-success"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
                         {% endif %}
                     </td>
-                    <td class="text-end text-success fw-bold">{{ amount|thousands }} ₺</td>
+                    <td class="text-end text-success fw-bold">{{ inc.amount|thousands }} ₺</td>
                 </tr>
                 {% else %}
                 <tr><td colspan="6" class="text-center text-muted p-3">Bu projeye ait gerçekleşmiş gelir kaydı yok.</td></tr>
@@ -150,25 +202,25 @@
                 </tr>
             </thead>
             <tbody>
-                {% for date, title, party_name, description, method, amount, type in expense_data %}
+                {% for exp in expense_data %}
                 <tr>
-                    <td>{{ date.strftime('%d.%m.%Y') }}</td>
+                    <td>{{ exp.date.strftime('%d.%m.%Y') }}</td>
                     <td>
-                        <div class="fw-bold">{{ title }}</div>
-                        <div class="text-muted small">{{ description or '-' }}</div>
+                        <div class="fw-bold">{{ exp.title }}</div>
+                        <div class="text-muted small">{{ exp.description or '-' }}</div>
                     </td>
                     <td>
-                        <div class="fw-bold">{{ party_name or '-' }}</div>
-                        <div class="text-muted small">{{ type }}</div>
+                        <div class="fw-bold">{{ exp.party or '-' }}</div>
+                        <div class="text-muted small">{{ exp.type }}</div>
                     </td>
                     <td>
-                        {% if method == 'çek' %}
+                        {% if exp.method == 'çek' %}
                             <span class="badge bg-info text-dark"><i class="fa-solid fa-money-check-dollar me-1"></i> Çek</span>
                         {% else %}
                             <span class="badge bg-danger"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
                         {% endif %}
                     </td>
-                    <td class="text-end text-danger fw-bold">{{ amount|thousands }} ₺</td>
+                    <td class="text-end text-danger fw-bold">{{ exp.amount|thousands }} ₺</td>
                 </tr>
                 {% else %}
                 <tr><td colspan="5" class="text-center text-muted p-3">Bu projeye ait gerçekleşmiş gider kaydı yok.</td></tr>
