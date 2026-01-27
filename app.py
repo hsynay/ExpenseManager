@@ -140,79 +140,6 @@ def new_project():
 
 
 
-# add_flats fonksiyonu
-
-# @app.route('/project/<int:project_id>/flats', methods=['GET', 'POST'])
-# def add_flats(project_id):
-#     """
-#     Bir projedeki tüm daireleri yönetir (CRUD).
-#     POST isteğinde, projenin tüm dairelerini siler ve formdan gelen yeni listeyi kaydeder.
-#     """
-#     if 'user_id' not in session:
-#         return redirect(url_for('login'))
-
-#     conn = get_connection()
-#     cur = conn.cursor()
-
-#     if request.method == 'POST':
-#         # Formdan gelen tüm daire verilerini listeler halinde al
-#         block_names = request.form.getlist('block_name[]')
-#         flat_nos = request.form.getlist('flat_no[]')
-#         floors = request.form.getlist('floor[]')
-#         room_types = request.form.getlist('room_type[]')
-        
-#         try:
-#             # 1. Önce bu projeye ait tüm mevcut daireleri sil (temiz bir başlangıç için)
-#             cur.execute("DELETE FROM flats WHERE project_id = %s", (project_id,))
-            
-#             # 2. Formdan gelen güncel listeyi veritabanına yeniden ekle
-#             for block, flat_no, floor, room_type in zip(block_names, flat_nos, floors, room_types):
-#                 # Sadece dolu satırların kaydedildiğinden emin ol
-#                 if block and flat_no and floor and room_type:
-#                     cur.execute("""
-#                         INSERT INTO flats (project_id, block_name, flat_no, floor, room_type)
-#                         VALUES (%s, %s, %s, %s, %s)
-#                     """, (project_id, block.strip(), flat_no, floor, room_type.strip()))
-            
-#             conn.commit()
-#             flash('Daire listesi başarıyla güncellendi.', 'success')
-#             return redirect(url_for('assign_flat_owner'))
-
-#         except Exception as e:
-#             conn.rollback()
-#             flash(f'Daireler güncellenirken bir hata oluştu: {e}', 'danger')
-#             return redirect(url_for('add_flats', project_id=project_id))
-#         finally:
-#             cur.close()
-#             conn.close()
-
-#     # GET isteği için: Proje adını ve mevcut daireleri çek
-#     try:
-#         cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
-#         project = cur.fetchone()
-#         if not project:
-#             flash('Proje bulunamadı.', 'danger')
-#             return redirect(url_for('dashboard'))
-#         project_name = project[0]
-        
-#         # Mevcut daireleri forma doldurmak için çek
-#         cur.execute("SELECT block_name, flat_no, floor, room_type FROM flats WHERE project_id = %s ORDER BY block_name, floor, flat_no", (project_id,))
-#         existing_flats = cur.fetchall()
-        
-#     except Exception as e:
-#         flash(f'Veri alınırken bir hata oluştu: {e}', 'danger')
-#         project_name = "Bilinmeyen Proje"
-#         existing_flats = []
-#     finally:
-#         cur.close()
-#         conn.close()
-
-#     return render_template('project_flats.html', 
-#                            project_id=project_id, 
-#                            project_name=project_name,
-#                            existing_flats=existing_flats)
-
-
 @app.route('/project/<int:project_id>/manage_flats', methods=['GET', 'POST'])
 def manage_flats(project_id):
     """
@@ -301,15 +228,6 @@ def manage_flats(project_id):
                            existing_flats=existing_flats)
 
 
-
-# app.py'deki MEVCUT list_expenses ve all_expenses fonksiyonlarını SİLİN.
-# select_project_for_expenses fonksiyonunu da AŞAĞIDAKİ İLE DEĞİŞTİRİN.
-
-# app.py dosyanızdaki mevcut list_expenses fonksiyonunu bu kodla değiştirin.
-
-# app.py'deki MEVCUT list_expenses ve all_expenses fonksiyonlarını SİLİN.
-# select_project_for_expenses fonksiyonunu da AŞAĞIDAKİ İLE DEĞİŞTİRİN.
-# app.py'deki MEVCUT list_expenses fonksiyonunu SİLİN ve bu kodla DEĞİŞTİRİN.
 
 @app.route('/expenses', methods=['GET'])
 def list_expenses():
