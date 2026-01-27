@@ -18,10 +18,11 @@
                     <strong>Kalan Borç:</strong> <span class="fw-bold text-danger">{{ (installment[2] - (installment[3] or 0))|thousands }} ₺</span>
                 </div>
 
-                <form method="POST" action="{{ url_for('pay_expense_installment', installment_id=installment[0]) }}">
+                <form method="POST" action="{{ url_for('pay_expense_installment', installment_id=installment[0], next=request.args.get('next')) }}">
+                    <input type="hidden" name="next" value="{{ next_url }}">
                     <div class="mb-3">
                         <label for="amount" class="form-label fw-semibold">Ödenecek Tutar (*)</label>
-                        <input type="text" class="form-control thousands-input" id="amount" name="amount" value="{{ installment[2] - (installment[3] or 0) }}" required>
+                        <input type="text" class="form-control thousands-input" id="amount" name="amount" value="{{ (installment[2] - (installment[3] or 0))|thousands }}" required>
                     </div>
                     <div class="mb-3">
                         <label for="payment_date" class="form-label fw-semibold">İşlem Tarihi (*)</label>
@@ -51,7 +52,7 @@
                     </div>
 
                     <div class="d-flex justify-content-end mt-4">
-                        <a href="{{ url_for('list_expenses', project_id=installment[6]) }}" class="btn btn-secondary me-2">İptal</a>
+                        <a href="{{ next_url or url_for('list_expenses', project_id=installment[6]) }}" class="btn btn-secondary me-2">İptal</a>
                         <button type="submit" class="btn btn-success">Ödemeyi Kaydet</button>
                     </div>
                 </form>
@@ -64,9 +65,53 @@
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // --- 1. Tarih Başlatma ---
         const today = new Date().toISOString().split('T')[0];
-        document.getElementById('payment_date').value = today;
+        const paymentDateInput = document.getElementById('payment_date');
+        if (paymentDateInput && !paymentDateInput.value) {
+            paymentDateInput.value = today;
+        }
 
+        // --- 2. Sayı Formatlama Mantığı (Global) ---
+        window.formatInputValue = function(raw) {
+            if (!raw) return '';
+            raw = String(raw).replace(/\s/g, '');
+            
+            let parts = raw.split(',');
+            let intPart = parts[0].replace(/\D/g, ''); // Sayı dışındaki her şeyi temizle
+            let fracPart = parts.length > 1 ? parts[1].replace(/\D/g, '') : '';
+
+            if (intPart === '' && fracPart === '') return '';
+            if (intPart === '') intPart = '0';
+
+            intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            return parts.length > 1 ? intPart + ',' + fracPart : intPart;
+        };
+
+        window.initThousandsInput = function(inputEl) {
+            if (!inputEl) return;
+            inputEl.addEventListener('input', function(e) {
+                const el = e.target;
+                const pos = el.selectionStart;
+                const oldLen = el.value.length;
+                
+                el.value = window.formatInputValue(el.value);
+                
+                const newLen = el.value.length;
+                const diff = newLen - oldLen;
+                el.setSelectionRange(pos + diff, pos + diff);
+            });
+        };
+
+        // --- 3. Formatlamayı Başlat ---
+        const amountInput = document.getElementById('amount');
+        if (amountInput) {
+            // Sayfa açıldığında mevcut değeri bir kez daha kontrol et ve formatla
+            amountInput.value = window.formatInputValue(amountInput.value);
+            window.initThousandsInput(amountInput);
+        }
+
+        // --- 4. Çek Alanları ve Ödeme Yöntemi ---
         const checkFields = document.getElementById('check_fields');
         const checkDueDateInput = document.getElementById('check_due_date');
         
@@ -81,6 +126,18 @@
                 }
             });
         });
+
+        // --- 5. Form Submit: Veriyi Temizle ---
+        const form = document.querySelector('form');
+        if (form) {
+            form.addEventListener('submit', function() {
+                if (amountInput) {
+                    let v = amountInput.value || '';
+                    // Noktaları sil, virgülü noktaya çevir
+                    amountInput.value = v.replace(/\./g, '').replace(',', '.');
+                }
+            });
+        }
     });
 </script>
 {% endblock %}

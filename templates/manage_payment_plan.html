@@ -24,7 +24,9 @@
                 </div>
             </div>
             <div class="card-body p-4">
-                <form method="POST" action="{{ url_for('manage_payment_plan', flat_id=flat_id) }}" id="payment-plan-form">
+                <form method="POST" action="{{ url_for('manage_payment_plan', flat_id=flat_id, next=request.args.get('next')) }}" id="payment-plan-form">
+                    <input type="hidden" name="plan_json" id="plan_json" />
+                    <input type="hidden" name="next" value="{{ next_url }}">
                     <div id="installments-container">
                         <!-- Başlıklar -->
                         <div class="row mb-2 d-none d-md-flex">
@@ -35,22 +37,23 @@
 
                         <!-- Mevcut Taksitler -->
                         {% for installment in existing_installments %}
-                        <div class="row g-3 mb-2 align-items-center installment-row">
-                            <div class="col-md-5">
-                                <input type="date" name="due_date[]" class="form-control" value="{{ installment[0].strftime('%Y-%m-%d') }}" {% if installment[2] %}readonly{% endif %} required>
+                            <div class="row g-3 mb-2 align-items-center installment-row">
+                                <input type="hidden" name="installment_id[]" value="{{ installment[3] }}">
+
+                                <div class="col-md-5">
+                                    <input type="date" name="due_date[]" class="form-control" value="{{ installment[0].strftime('%Y-%m-%d') }}" {% if installment[2] %}readonly{% endif %} required>
+                                </div>
+                                <div class="col-md-5">
+                                    <input type="text" step="0.01" name="amount[]" class="form-control thousands-input" value="{{ installment[1]|thousands }}" {% if installment[2] %}readonly{% endif %} required>
+                                </div>
+                                <div class="col-md-2">
+                                    {% if installment[2] %}
+                                        <span class="badge bg-success w-100 p-2">ÖDENDİ</span>
+                                    {% else %}
+                                        <button type="button" class="btn btn-danger w-100 remove-row"><i class="fa-solid fa-trash-alt"></i></button>
+                                    {% endif %}
+                                </div>
                             </div>
-                            <div class="col-md-5">
-                                <!-- gösterim için binlik ayraçlı, submit öncesi JS ile normalize edilecek -->
-                                <input type="text" step="0.01" name="amount[]" class="form-control thousands-input" value="{{ installment[1]|thousands }}" {% if installment[2] %}readonly{% endif %} required>
-                            </div>
-                            <div class="col-md-2">
-                                {% if installment[2] %}
-                                    <span class="badge bg-success w-100 p-2">ÖDENDİ</span>
-                                {% else %}
-                                    <button type="button" class="btn btn-danger w-100 remove-row"><i class="fa-solid fa-trash-alt"></i></button>
-                                {% endif %}
-                            </div>
-                        </div>
                         {% endfor %}
                     </div>
 
@@ -77,75 +80,60 @@
         const container = document.getElementById('installments-container');
         const form = document.getElementById('payment-plan-form');
 
-        // Format: 1234567.89 -> "1.234.567,89"
-        function formatThousandsDisplay(value) {
-            if (value === null || value === undefined || value === '') return '';
-            // ensure string
-            let s = String(value).trim();
-            // normalize possible decimal comma or dot to dot for processing
-            s = s.replace(/\s/g, '').replace(',', '.');
-            if (isNaN(s)) return value;
-            let parts = s.split('.');
-            let intPart = parts[0];
-            let fracPart = parts[1] || '';
-            // add leading negative sign if any
-            const sign = intPart.startsWith('-') ? '-' : '';
-            if (sign) intPart = intPart.slice(1);
+        // --- 1. Sayı Formatlama Fonksiyonları ---
+        window.formatInputValue = function(raw) {
+            if (!raw) return '';
+            raw = String(raw).replace(/\s/g, '');
+            let parts = raw.split(',');
+            let intPart = parts[0].replace(/\D/g, ''); 
+            let fracPart = parts.length > 1 ? parts[1].replace(/\D/g, '') : '';
+
+            if (intPart === '' && fracPart === '') return '';
+            if (intPart === '') intPart = '0';
+
             intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-            if (fracPart.length > 0) {
-                // trim trailing zeros
-                fracPart = fracPart.replace(/0+$/, '');
-                return sign + intPart + (fracPart ? ',' + fracPart : '');
-            }
-            return sign + intPart;
-        }
+            return parts.length > 1 ? intPart + ',' + fracPart : intPart;
+        };
 
-        // Parse display format to en numeric string: "1.234.567,89" -> "1234567.89"
-        function parseToPlainNumber(displayValue) {
-            if (!displayValue && displayValue !== 0) return '';
-            let s = String(displayValue).trim();
-            if (s === '') return '';
-            // remove dots (thousands), replace comma with dot for decimal
-            s = s.replace(/\./g, '').replace(',', '.');
-            return s;
-        }
-
-        // Apply display formatting to an input element (keeps editable)
-        function applyDisplayFormat(input) {
-            const cursorPos = input.selectionStart;
-            const oldLen = input.value.length;
-            const plain = parseToPlainNumber(input.value);
-            input.value = formatThousandsDisplay(plain);
-            // try to restore caret roughly
-            const newLen = input.value.length;
-            const newPos = Math.max(0, cursorPos + (newLen - oldLen));
-            input.setSelectionRange(newPos, newPos);
-        }
-
-        // Initialize formatting for existing inputs
-        function initExistingInputs() {
-            document.querySelectorAll('.thousands-input').forEach(function(inp) {
-                // format initial raw value if needed (already formatted by Jinja, but safe)
-                inp.value = formatThousandsDisplay(parseToPlainNumber(inp.value));
+        window.initThousandsInput = function(inputEl) {
+            if (!inputEl) return;
+            inputEl.addEventListener('input', function(e) {
+                const el = e.target;
+                const pos = el.selectionStart;
+                const oldLen = el.value.length;
+                
+                el.value = window.formatInputValue(el.value);
+                
+                const newLen = el.value.length;
+                const diff = newLen - oldLen;
+                el.setSelectionRange(pos + diff, pos + diff);
             });
-        }
+        };
 
-        // Yeni satır ekleme
+        // --- 2. Mevcut ve Yeni Satırları Yönet ---
+
+        // Sayfa yüklendiğinde mevcut taksitleri formatla
+        document.querySelectorAll('.thousands-input').forEach(inp => {
+            inp.value = window.formatInputValue(inp.value);
+            window.initThousandsInput(inp);
+        });
+
+        // Yeni satır ekleme butonu
+        // Yeni satır ekleme butonu kodunu şöyle güncelleyin:
         document.getElementById('add-row-btn').addEventListener('click', function() {
             const newRow = document.createElement('div');
             newRow.classList.add('row', 'g-3', 'mb-2', 'align-items-center', 'installment-row');
+            
+            // GİZLİ INPUT (value="") BURAYA DA EKLENDİ
             newRow.innerHTML = `
-                <div class="col-md-5">
-                    <input type="date" name="due_date[]" class="form-control" required>
-                </div>
-                <div class="col-md-5">
-                    <input type="text" step="0.01" name="amount[]" class="form-control thousands-input" required>
-                </div>
-                <div class="col-md-2">
-                    <button type="button" class="btn btn-danger w-100 remove-row"><i class="fa-solid fa-trash-alt"></i></button>
-                </div>
+                <input type="hidden" name="installment_id[]" value="">
+                <div class="col-md-5"><input type="date" name="due_date[]" class="form-control" required></div>
+                <div class="col-md-5"><input type="text" name="amount[]" class="form-control thousands-input" required></div>
+                <div class="col-md-2"><button type="button" class="btn btn-danger w-100 remove-row"><i class="fa-solid fa-trash-alt"></i></button></div>
             `;
             container.appendChild(newRow);
+            const newInput = newRow.querySelector('.thousands-input');
+            if (newInput) window.initThousandsInput(newInput);
         });
 
         // Satır silme
@@ -155,36 +143,21 @@
             }
         });
 
-        // Input event delegation for formatting
-        container.addEventListener('input', function(e) {
-            const inp = e.target.closest('.thousands-input') ? e.target.closest('.thousands-input') : null;
-            if (inp) {
-                // we format on blur for better UX, but also normalize simple typing here:
-                // allow digits, dot, comma, hyphen; remove other chars
-                inp.value = inp.value.replace(/[^0-9\.,\-]/g, '');
-            }
-        });
-
-        // On blur apply display format
-        container.addEventListener('blur', function(e) {
-            const inp = e.target.closest('.thousands-input') ? e.target.closest('.thousands-input') : null;
-            if (inp) {
-                applyDisplayFormat(inp);
-            }
-        }, true);
-
-        // Form submit: normalize all amount inputs to plain numeric string acceptable by server (dot decimal)
-        form.addEventListener('submit', function(ev) {
-            document.querySelectorAll('.thousands-input').forEach(function(inp) {
-                // if readonly (paid) keep as is but normalize anyway
-                const plain = parseToPlainNumber(inp.value);
-                // set to plain format with dot for decimal and no thousands
-                inp.value = plain;
+        // --- 3. Form Kayıt: Veriyi JSON olarak topla (sıra korunur) ---
+        form.addEventListener('submit', function() {
+            const rows = [];
+            container.querySelectorAll('.installment-row').forEach(function(row) {
+                const idInput = row.querySelector('input[name=\"installment_id[]\"]');
+                const dateInput = row.querySelector('input[name=\"due_date[]\"]');
+                const amountInput = row.querySelector('input[name=\"amount[]\"]');
+                rows.push({
+                    installment_id: idInput ? idInput.value : '',
+                    due_date: dateInput ? dateInput.value : '',
+                    amount: amountInput ? amountInput.value.replace(/\\./g, '').replace(',', '.') : ''
+                });
             });
+            document.getElementById('plan_json').value = JSON.stringify(rows);
         });
-
-        // initialize on load
-        initExistingInputs();
     });
 </script>
 {% endblock %}

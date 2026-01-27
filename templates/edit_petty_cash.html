@@ -9,13 +9,14 @@
             <div class="card-body p-4">
                 <h3 class="mb-4">Küçük Gideri Düzenle</h3>
                 <form method="POST">
+                    <input type="hidden" name="next" value="{{ next_url }}">
                     <div class="mb-3">
                         <label class="form-label">Başlık</label>
                         <input type="text" name="title" class="form-control" value="{{ item.title }}" required>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Tutar (₺)</label>
-                        <input type="text" step="0.01" name="amount" class="form-control thousands-input" value="{{ item.amount }}" required>
+                        <input type="text" step="0.01" name="amount" class="form-control thousands-input" value="{{ item.amount|thousands }}" required>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Tarih</label>
@@ -26,7 +27,7 @@
                         <textarea name="description" class="form-control" rows="3">{{ item.description }}</textarea>
                     </div>
                     <div class="d-flex justify-content-end">
-                        <a href="{{ url_for('list_expenses', project_id=project_id) }}" class="btn btn-secondary me-2">İptal</a>
+                        <a href="{{ next_url or url_for('list_expenses', project_id=project_id) }}" class="btn btn-secondary me-2">İptal</a>
                         <button type="submit" class="btn btn-primary">Kaydet</button>
                     </div>
                 </form>
@@ -34,4 +35,55 @@
         </div>
     </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // --- Sayı Formatlama Mantığı ---
+        window.formatInputValue = function(raw) {
+            if (!raw) return '';
+            raw = String(raw).replace(/\s/g, '');
+            let parts = raw.split(',');
+            let intPart = parts[0].replace(/\D/g, ''); 
+            let fracPart = parts.length > 1 ? parts[1].replace(/\D/g, '') : '';
+            if (intPart === '' && fracPart === '') return '';
+            if (intPart === '') intPart = '0';
+            intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            return parts.length > 1 ? intPart + ',' + fracPart : intPart;
+        };
+
+        window.initThousandsInput = function(inputEl) {
+            if (!inputEl) return;
+            inputEl.addEventListener('input', function(e) {
+                const el = e.target;
+                const pos = el.selectionStart;
+                const oldLen = el.value.length;
+                el.value = window.formatInputValue(el.value);
+                const newLen = el.value.length;
+                const diff = newLen - oldLen;
+                el.setSelectionRange(pos + diff, pos + diff);
+            });
+        };
+
+        // Sayfa yüklendiğinde mevcut değeri formatla ve dinleyiciyi başlat
+        const amountInput = document.querySelector('.thousands-input');
+        if (amountInput) {
+            // İlk açılışta veritabanından gelen değeri formatla
+            amountInput.value = window.formatInputValue(amountInput.value);
+            window.initThousandsInput(amountInput);
+        }
+
+        // Kaydederken formatı temizle
+        const form = document.querySelector('form');
+        if (form) {
+            form.addEventListener('submit', function() {
+                const inp = this.querySelector('.thousands-input');
+                if (inp) {
+                    let v = inp.value || '';
+                    inp.value = v.replace(/\./g, '').replace(',', '.'); 
+                }
+            });
+        }
+    });
+</script>
 {% endblock %}
