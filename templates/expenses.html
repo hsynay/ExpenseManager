@@ -24,8 +24,9 @@
 
 <div class="filter-card mb-4">
     <form class="row g-3" method="get" id="filterForm" action="{{ url_for('list_expenses') }}">
-        <div class="col-md-8">
-            <label class="form-label fw-semibold">Giderlerini Görmek İçin Proje Seçin</label>
+        <h6>Filtreleme yaparak daha detaylı sonuçlar görüntüleyebilirsiniz.</h6>
+        <div class="col-md-4">
+            <label class="form-label fw-semibold">Proje Seçin</label>
             <select name="project_id" class="form-select" onchange="this.form.submit()">
                 <option value="" selected disabled>Lütfen bir proje seçin...</option>
                 {% for pr in all_projects %}
@@ -33,6 +34,41 @@
                 {% endfor %}
             </select>
         </div>
+        {% if detailed_view %}
+        <div class="col-md-2">
+            <label class="form-label fw-semibold">Gider Türü</label>
+            <select name="expense_type" class="form-select">
+                <option value="all" {% if expense_type == 'all' %}selected{% endif %}>Tümü</option>
+                <option value="large" {% if expense_type == 'large' %}selected{% endif %}>Büyük Gider</option>
+                <option value="petty" {% if expense_type == 'petty' %}selected{% endif %}>Küçük Gider</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label fw-semibold">Gider Adı</label>
+            <select name="title" id="expenseTitleSelect" class="form-select">
+                <option value="">Tüm gider adları</option>
+                {% for t in large_titles %}
+                <option value="{{ t }}" data-type="large" {% if title_filter == t %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+                {% for t in petty_titles %}
+                <option value="{{ t }}" data-type="petty" {% if title_filter == t %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3" id="supplierFilter">
+            <label class="form-label fw-semibold">Tedarikçi</label>
+            <select name="supplier_id" class="form-select">
+                <option value="">Tüm tedarikçiler</option>
+                {% for sid, sname in supplier_list %}
+                <option value="{{ sid }}" {% if supplier_id and sid|string == supplier_id|string %}selected{% endif %}>{{ sname }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-12 d-flex justify-content-end gap-2">
+            <button type="submit" class="btn btn-primary">Filtrele</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('list_expenses', project_id=project_id) }}">Temizle</a>
+        </div>
+        {% endif %}
     </form>
 </div>
 
@@ -47,7 +83,7 @@
         <div class="col-4"><h6 class="text-muted mb-1">KALAN GİDER BORCU</h6><h4 class="fw-bold text-dark mb-0">{{ total_remaining_due|thousands }} ₺</h4></div>
     </div></div></div>
     
-    <div class="card mb-4">
+    <div class="card mb-4" id="petty-section">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="mb-0"><i class="fa-solid fa-coins me-2 text-warning"></i>Proje Genel Giderleri (Fiş, Yemek vb.)</h5>
             <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#addPettyCashModal"><i class="fa-solid fa-plus me-1"></i>Yeni Küçük Gider Ekle</button>
@@ -93,7 +129,8 @@
                 <strong class="me-3"><i class="fa-solid fa-truck-fast text-muted"></i> Tedarikçi: {{ expense.supplier_name }}</strong>
             </div>
             <div>
-                <a href="{{ url_for('manage_expense_plan', expense_id=expense.expense_id) }}" class="btn btn-outline-warning btn-sm" title="Planı Yönet"><i class="fa-solid fa-edit me-1"></i>Planı Yönet</a>
+                {% set return_url = url_for('list_expenses') + ('?' + current_query if current_query else '') + '#exp-' + expense.expense_id|string %}
+                <a href="{{ url_for('manage_expense_plan', expense_id=expense.expense_id, next=return_url) }}" class="btn btn-outline-warning btn-sm" title="Planı Yönet"><i class="fa-solid fa-edit me-1"></i>Planı Yönet</a>
                 <form action="{{ url_for('delete_expense', expense_id=expense.expense_id) }}" method="POST" class="d-inline">
                     <input type="hidden" name="project_id" value="{{ project_id }}">
                     <button type="submit" class="btn btn-outline-danger btn-sm" title="Gideri Sil" onclick="return confirm('Bu gideri ve tüm taksitlerini silmek istediğinizden emin misiniz?')"><i class="fa-solid fa-trash-alt"></i></button>
@@ -114,7 +151,7 @@
                         <tr class="{{ installment.css_class }}">
                             <td>{{ installment.due_date.strftime('%d.%m.%Y') }}</td><td class="text-end fw-bold">{{ installment.total_amount|thousands }} ₺</td><td class="text-end fw-bold text-danger">{{ installment.remaining_installment_due|thousands }} ₺</td>
                             <td class="text-center"><span class="badge {% if installment.status == 'Ödendi' %} bg-success {% elif 'Kısmen' in installment.status %} bg-warning text-dark {% elif installment.status == 'Gecikmiş' %} bg-danger {% else %} bg-secondary {% endif %}">{{ installment.status }}</span></td>
-                            <td class="text-center">{% if not installment.is_paid %}<a href="{{ url_for('pay_expense_installment', installment_id=installment.id) }}" class="btn btn-sm btn-success"><i class="fa-solid fa-cash-register me-1"></i> Öde</a>{% else %}<i class="fa-solid fa-check-circle text-success fs-5"></i>{% endif %}</td>
+                            <td class="text-center">{% if not installment.is_paid %}<a href="{{ url_for('pay_expense_installment', installment_id=installment.id, next=return_url) }}" class="btn btn-sm btn-success"><i class="fa-solid fa-cash-register me-1"></i> Öde</a>{% else %}<i class="fa-solid fa-check-circle text-success fs-5"></i>{% endif %}</td>
                         </tr>
                         {% else %}
                         <tr><td colspan="5" class="text-center text-muted p-2 small">Ödeme planı oluşturulmamış.</td></tr>
@@ -194,4 +231,79 @@
         </div>
     </div>
 {% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // --- 1. Sayı Formatlama Mantığı ---
+        window.formatInputValue = function(raw) {
+            if (!raw) return '';
+            raw = String(raw).replace(/\s/g, '');
+            let parts = raw.split(',');
+            let intPart = parts[0].replace(/\D/g, ''); 
+            let fracPart = parts.length > 1 ? parts[1].replace(/\D/g, '') : '';
+            if (intPart === '' && fracPart === '') return '';
+            if (intPart === '') intPart = '0';
+            intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            return parts.length > 1 ? intPart + ',' + fracPart : intPart;
+        };
+
+        window.initThousandsInput = function(inputEl) {
+            if (!inputEl) return;
+            inputEl.addEventListener('input', function(e) {
+                const el = e.target;
+                const pos = el.selectionStart;
+                const oldLen = el.value.length;
+                el.value = window.formatInputValue(el.value);
+                const newLen = el.value.length;
+                const diff = newLen - oldLen;
+                el.setSelectionRange(pos + diff, pos + diff);
+            });
+        };
+
+        // Modal içindeki ve sayfadaki tüm binlik ayraçlı inputları başlat
+        document.querySelectorAll('.thousands-input').forEach(inp => window.initThousandsInput(inp));
+
+        // --- 2. Gider Türüne Göre Filtre Alanları ---
+        const expenseTypeSelect = document.querySelector('select[name="expense_type"]');
+        const supplierFilter = document.getElementById('supplierFilter');
+        const expenseTitleSelect = document.getElementById('expenseTitleSelect');
+
+        function applyExpenseTypeUI() {
+            const type = expenseTypeSelect ? expenseTypeSelect.value : 'all';
+            if (supplierFilter) {
+                supplierFilter.style.display = (type === 'large') ? '' : 'none';
+            }
+            if (expenseTitleSelect) {
+                const options = Array.from(expenseTitleSelect.options);
+                options.forEach((opt, idx) => {
+                    if (idx === 0) return; // "Tüm gider adları"
+                    const optType = opt.dataset.type;
+                    if (type === 'all') {
+                        opt.hidden = false;
+                    } else {
+                        opt.hidden = optType !== type;
+                    }
+                });
+            }
+        }
+
+        if (expenseTypeSelect) {
+            expenseTypeSelect.addEventListener('change', applyExpenseTypeUI);
+            applyExpenseTypeUI();
+        }
+
+        // --- 3. Form Gönderimi Öncesi Temizlik ---
+        // Pop-up formunu yakala
+        const pettyCashForm = document.querySelector('form[action*="add_petty_cash"]');
+        if (pettyCashForm) {
+            pettyCashForm.addEventListener('submit', function() {
+                this.querySelectorAll('.thousands-input').forEach(function(inp) {
+                    let v = inp.value || '';
+                    inp.value = v.replace(/\./g, '').replace(',', '.'); 
+                });
+            });
+        }
+    });
+</script>
 {% endblock %}

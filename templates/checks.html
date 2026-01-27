@@ -10,20 +10,101 @@
 
 <div class="card mb-4">
     <div class="card-body text-center p-3">
-        <div class="row">
+        <div class="row gy-3">
             <div class="col-md-4 border-end">
-                <h6 class="text-muted mb-1">PORTFÖYDEKİ ALACAK ÇEKLERİ</h6>
+                <h6 class="text-muted mb-1">ALINAN - Çek portföyde</h6>
                 <h4 class="fw-bold text-success mb-0">{{ total_incoming_portfolio|thousands }} ₺</h4>
             </div>
             <div class="col-md-4 border-end">
-                <h6 class="text-muted mb-1">VERİLMİŞ BORÇ ÇEKLERİ</h6>
-                <h4 class="fw-bold text-danger mb-0">{{ total_outgoing_portfolio|thousands }} ₺</h4>
+                <h6 class="text-muted mb-1">ALINAN - Tahsil Edildi</h6>
+                <h4 class="fw-bold text-primary mb-0">{{ total_incoming_cleared|thousands }} ₺</h4>
             </div>
             <div class="col-md-4">
+                <h6 class="text-muted mb-1"></h6>ALINAN - NET</h6>
+                <h4 class="fw-bold text-primary mb-0">{{ net_incoming_checks|thousands }} ₺</h4>
+            </div>
+            <span></span>
+            <div class="col-md-4 border-end">
+                <h6 class="text-muted mb-1">VERİLEN - Çek verildi</h6>
+                <h4 class="fw-bold text-warning mb-0">{{ total_outgoing_portfolio|thousands }} ₺</h4>
+            </div>
+            <div class="col-md-4 border-end">
+                <h6 class="text-muted mb-1">VERİLEN - Ödendi</h6>
+                <h4 class="fw-bold text-danger mb-0">{{ total_outgoing_paid|thousands }} ₺</h4>
+            </div>
+            <div class="col-md-4">
+                <h6 class="text-muted mb-1">VERİLEN - NET</h6>
+                <h4 class="fw-bold text-danger mb-0">{{ net_outgoing_checks|thousands }} ₺</h4>
+            </div>
+        </div>
+        <div class="row pt-3 mt-3 border-top">
+            <div class="col-12">
                 <h6 class="text-muted mb-1">NET ÇEK POZİSYONU</h6>
                 <h4 class="fw-bold {{ 'text-success' if net_check_position >= 0 else 'text-danger' }} mb-0">{{ net_check_position|thousands }} ₺</h4>
             </div>
         </div>
+    </div>
+</div>
+<div class="card mb-4">
+    <div class="card-body">
+        <form class="row g-3" method="get" action="{{ url_for('list_checks') }}">
+            <div class="col-md-3">
+                <label class="form-label fw-semibold" style="color: green;">Alınan Çek - Vade Başlangıç</label>
+                <input type="date" name="in_due_from" class="form-control" value="{{ in_due_from or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold"  style="color: green;">Alınan Çek - Vade Bitiş</label>
+                <input type="date" name="in_due_to" class="form-control" value="{{ in_due_to or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold" style="color: green;">Veren Müşteri</label>
+                <select name="in_customer" class="form-select">
+                    <option value="">Tümü</option>
+                    {% for p in incoming_parties %}
+                    <option value="{{ p }}" {% if in_customer==p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold"  style="color: green;">Alınan Çek Durumu</label>
+                <select name="in_status" class="form-select">
+                    <option value="all" {% if in_status=='all' %}selected{% endif %}>Tümü</option>
+                    <option value="portfoyde" {% if in_status=='portfoyde' %}selected{% endif %}>Portföyde</option>
+                    <option value="tahsil_edildi" {% if in_status=='tahsil_edildi' %}selected{% endif %}>Tahsil Edildi</option>
+                    <option value="karsiliksiz" {% if in_status=='karsiliksiz' %}selected{% endif %}>Karşılıksız</option>
+                </select>
+            </div>
+            <span></span>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold"  style="color: red;">Verilen Çek - Vade Başlangıç</label>
+                <input type="date" name="out_due_from" class="form-control" value="{{ out_due_from or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold" style="color: red;">Verilen Çek - Vade Bitiş</label>
+                <input type="date" name="out_due_to" class="form-control" value="{{ out_due_to or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold" style="color: red;">Verilen Kişi/Kurum</label>
+                <select name="out_supplier" class="form-select">
+                    <option value="">Tümü</option>
+                    {% for p in outgoing_parties %}
+                    <option value="{{ p }}" {% if out_supplier==p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold" style="color: red;">Verilen Çek Durumu</label>
+                <select name="out_status" class="form-select">
+                    <option value="all" {% if out_status=='all' %}selected{% endif %}>Tümü</option>
+                    <option value="verildi" {% if out_status=='verildi' %}selected{% endif %}>Verildi</option>
+                    <option value="odendi" {% if out_status=='odendi' %}selected{% endif %}>Ödendi</option>
+                </select>
+            </div>
+            <div class="col-md-3 d-flex align-items-end justify-content-end gap-2">
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-filter me-1"></i>Filtrele</button>
+                <a href="{{ url_for('list_checks') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-refresh me-1"></i>Temizle</a>
+            </div>
+        </form>
     </div>
 </div>
 <div class="row g-4">

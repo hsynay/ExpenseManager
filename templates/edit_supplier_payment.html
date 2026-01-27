@@ -19,7 +19,7 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="amount" class="form-label fw-semibold">Ödeme Tutarı (₺) (*)</label>
-                            <input type="text" class="form-control thousands-input" id="amount" name="amount" value="{{ payment.amount }}" required>
+                            <input type="text" class="form-control thousands-input" id="amount" name="amount" value="{{ payment.amount|thousands }}" required>
                         </div>
                         <div class="col-md-6">
                             <label for="payment_date" class="form-label fw-semibold">İşlem Tarihi (*)</label>
@@ -49,4 +49,54 @@
         </div>
     </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // --- Sayı Formatlama Fonksiyonları ---
+        window.formatInputValue = function(raw) {
+            if (!raw) return '';
+            raw = String(raw).replace(/\s/g, '');
+            let parts = raw.split(',');
+            let intPart = parts[0].replace(/\D/g, ''); 
+            let fracPart = parts.length > 1 ? parts[1].replace(/\D/g, '') : '';
+            if (intPart === '' && fracPart === '') return '';
+            if (intPart === '') intPart = '0';
+            intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            return parts.length > 1 ? intPart + ',' + fracPart : intPart;
+        };
+
+        window.initThousandsInput = function(inputEl) {
+            if (!inputEl) return;
+            inputEl.addEventListener('input', function(e) {
+                const el = e.target;
+                const pos = el.selectionStart;
+                const oldLen = el.value.length;
+                el.value = window.formatInputValue(el.value);
+                const newLen = el.value.length;
+                const diff = newLen - oldLen;
+                el.setSelectionRange(pos + diff, pos + diff);
+            });
+        };
+
+        // --- Başlat ---
+        const amountInput = document.getElementById('amount');
+        if (amountInput) {
+            // İlk açılışta formatla ve dinleyiciyi ekle
+            amountInput.value = window.formatInputValue(amountInput.value);
+            window.initThousandsInput(amountInput);
+        }
+
+        // --- Form Submit: Temizle ---
+        const form = document.querySelector('form');
+        if (form) {
+            form.addEventListener('submit', function() {
+                if (amountInput) {
+                    let v = amountInput.value || '';
+                    amountInput.value = v.replace(/\./g, '').replace(',', '.');
+                }
+            });
+        }
+    });
+</script>
 {% endblock %}

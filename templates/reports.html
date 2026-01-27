@@ -74,6 +74,86 @@
                         </span>
                     </p>
 
+                    {% set mb = month_boxes.get(s.project_id) if month_boxes else None %}
+                    {% if mb %}
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <div class="p-2 bg-light rounded border">
+                                <small class="text-muted">Bu ay tahsil</small>
+                                <div class="fw-bold text-success fs-6">{{ mb.month_income|thousands }} ₺</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 bg-light rounded border">
+                                <small class="text-muted">Bu ay ödeme</small>
+                                <div class="fw-bold text-danger fs-6">{{ mb.month_expense|thousands }} ₺</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 bg-light rounded border">
+                                <small class="text-muted">Bu ay net</small>
+                                <div class="fw-bold {% if mb.month_net>=0 %}text-success{% else %}text-danger{% endif %} fs-6">{{ mb.month_net|thousands }} ₺</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 bg-light rounded border">
+                                <small class="text-muted">Geciken taksit</small>
+                                <div class="fw-bold text-warning fs-6">{{ mb.overdue_inst_count }} adet / {{ mb.overdue_inst_amount|thousands }} ₺</div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="p-2 bg-light rounded border">
+                                <small class="text-muted">Geciken çek</small>
+                                <div class="fw-bold text-warning fs-6">{{ mb.overdue_checks_amount|thousands }} ₺</div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <div class="mt-4">
+                        <h6 class="text-muted mb-2"><i class="fa-solid fa-chart-column me-1 text-primary"></i>Son 12 Ay Gelir/Gider</h6>
+                        <canvas id="ie-chart-{{ s.project_id }}" height="220"></canvas>
+                    </div>
+                    <div class="mt-4">
+                        <h6 class="text-muted mb-2"><i class="fa-solid fa-money-check-dollar me-1 text-info"></i>Son 12 Ay Çek Durumu</h6>
+                        <canvas id="check-chart-{{ s.project_id }}" height="220"></canvas>
+                    </div>
+                    <div class="mt-4">
+                        <h6 class="text-muted mb-2"><i class="fa-solid fa-chart-line me-1 text-success"></i>90 Gün Kasa Projeksiyonu</h6>
+                        <canvas id="proj-chart-{{ s.project_id }}" height="200"></canvas>
+                        <p class="small text-muted mb-0 mt-1">
+                            Grafik, son 90 gündeki gerçek net nakit hızını temel alır, buna önümüzdeki 90 gündeki planlı taksit ve gider ödemelerini ekleyerek 0/30/60/90. günlerde beklenen kasa bakiyesini tahmin eder.
+                            Böylece nakit açığı veya fazlası oluşabilecek dönemleri önceden görüp aksiyon almanızı sağlar.
+                        </p>
+                    </div>
+
+                    {% set od = overdue_items.get(s.project_id) if overdue_items else None %}
+                    {% if od and od.rows %}
+                    <div class="mt-4">
+                        <h6 class="text-muted mb-2"><i class="fa-solid fa-clock me-1 text-warning"></i>En Eski 10 Geciken Taksit</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-2">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Vade</th><th>Müşteri</th><th>Daire</th><th>Kalan</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for r in od.rows %}
+                                    <tr>
+                                        <td>{{ r[0].strftime('%d.%m.%Y') if r[0] else '' }}</td>
+                                        <td>{{ r[1] }}</td>
+                                        <td>{{ r[2] }} Blok {{ r[3] }}.Kat No:{{ r[4] }}</td>
+                                        <td class="text-danger fw-bold">{{ r[5]|thousands }} ₺</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="text-end small text-muted">Toplam gecikme: <strong class="text-danger">{{ od.total|thousands }} ₺</strong></div>
+                    </div>
+                    {% endif %}
+
                     {% else %}
                     <h5 class="text-muted mb-3"><i class="fa-solid fa-hand-holding-dollar text-primary me-2"></i>Üye Katkıları</h5>
                     <ul class="list-group mb-3">
@@ -108,4 +188,138 @@
         {% endfor %}
     {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const monthlySeries = {{ monthly_series|tojson }};
+const checkSeries = {{ check_series|tojson }};
+const projectionSeries = {{ projection_series|tojson }};
+
+Object.entries(monthlySeries).forEach(([pid, data]) => {
+    const canvas = document.getElementById(`ie-chart-${pid}`);
+    if (!canvas) return;
+
+    const fmt = value => new Intl.NumberFormat('tr-TR').format(value) + ' ₺';
+
+    new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: data.labels,
+            datasets: [
+                {
+                    label: 'Gelir',
+                    data: data.income,
+                    backgroundColor: 'rgba(25,135,84,0.65)',
+                    borderColor: 'rgba(25,135,84,1)',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Gider',
+                    data: data.expense,
+                    backgroundColor: 'rgba(220,53,69,0.65)',
+                    borderColor: 'rgba(220,53,69,1)',
+                    borderWidth: 1
+                },
+                {
+                    type: 'line',
+                    label: 'Net',
+                    data: data.net,
+                    borderColor: 'rgba(13,110,253,0.95)',
+                    backgroundColor: 'rgba(13,110,253,0.15)',
+                    borderWidth: 2,
+                    tension: 0.25,
+                    fill: true
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: ctx => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}`
+                    }
+                },
+                legend: { position: 'top' }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: { callback: value => fmt(value) }
+                },
+                x: {
+                    ticks: { maxRotation: 45, minRotation: 45 }
+                }
+            }
+        }
+    });
+});
+
+Object.entries(checkSeries).forEach(([pid, data]) => {
+    const canvas = document.getElementById(`check-chart-${pid}`);
+    if (!canvas) return;
+    const fmt = value => new Intl.NumberFormat('tr-TR').format(value) + ' ₺';
+    new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: data.labels,
+            datasets: [
+                { label: 'Alınan - Portföy', data: data.incoming_portfolio, backgroundColor: 'rgba(255,193,7,0.65)', stack: 'in' },
+                { label: 'Alınan - Tahsil', data: data.incoming_cleared, backgroundColor: 'rgba(40,167,69,0.65)', stack: 'in' },
+                { label: 'Verilen - Verildi', data: data.outgoing_given, backgroundColor: 'rgba(13,110,253,0.6)', stack: 'out' },
+                { label: 'Verilen - Ödendi', data: data.outgoing_paid, backgroundColor: 'rgba(220,53,69,0.65)', stack: 'out' }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}` } },
+                legend: { position: 'top' }
+            },
+            scales: {
+                x: { stacked: true, ticks: { maxRotation: 45, minRotation: 45 } },
+                y: { stacked: true, beginAtZero: true, ticks: { callback: value => fmt(value) } }
+            }
+        }
+    });
+});
+
+Object.entries(projectionSeries).forEach(([pid, points]) => {
+    const canvas = document.getElementById(`proj-chart-${pid}`);
+    if (!canvas) return;
+    const labels = points.map(p => p.date);
+    const values = points.map(p => p.cash);
+    const fmt = value => new Intl.NumberFormat('tr-TR').format(value) + ' ₺';
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Projeksiyon',
+                data: values,
+                borderColor: 'rgba(102,16,242,0.95)',
+                backgroundColor: 'rgba(102,16,242,0.15)',
+                borderWidth: 2,
+                tension: 0.25,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                tooltip: { callbacks: { label: ctx => `${fmt(ctx.parsed.y)}` } },
+                legend: { display: false }
+            },
+            scales: {
+                y: { beginAtZero: false, ticks: { callback: value => fmt(value) } }
+            }
+        }
+    });
+});
+</script>
 {% endblock %}

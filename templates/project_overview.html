@@ -79,14 +79,71 @@
 </div>
 
 <div class="filter-card mb-4">
+    <h5 style="color: rgb(13, 109, 252);">Bağımsız Filteleme</h5>
+    <span></span>
     <form class="row g-3" method="get">
         <input type="hidden" name="sort_by" value="{{ sort_by }}">
         <input type="hidden" name="order" value="{{ order }}">
-        <div class="col-md-4"><label class="form-label fw-semibold">Başlangıç Tarihi</label><input type="date" name="start_date" class="form-control" value="{{ start_date or '' }}"></div>
-        <div class="col-md-4"><label class="form-label fw-semibold">Bitiş Tarihi</label><input type="date" name="end_date" class="form-control" value="{{ end_date or '' }}"></div>
-        <div class="col-md-4 d-flex align-items-end">
-            <button type="submit" class="btn btn-primary me-2"><i class="fa-solid fa-filter me-1"></i>Filtrele</button>
-            <a href="{{ url_for('project_overview', project_id=project_id) }}" class="btn btn-outline-secondary"><i class="fa-solid fa-refresh me-1"></i>Temizle</a>
+        <div class="col-md-3"><label class="form-label fw-semibold">Başlangıç Tarihi</label><input type="date" name="start_date" class="form-control" value="{{ start_date or '' }}"></div>
+        <div class="col-md-3"><label class="form-label fw-semibold">Bitiş Tarihi</label><input type="date" name="end_date" class="form-control" value="{{ end_date or '' }}"></div>
+        <div class="col-md-6"></div>
+        <div class="col-md-3"><label class="form-label fw-semibold">Gelir - Kimden</label>
+            <select name="income_party" class="form-select">
+                <option value="">Tümü</option>
+                {% for p in income_parties %}
+                <option value="{{ p }}" {% if income_party==p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2"><label class="form-label fw-semibold">Gelir - Yöntem</label>
+            <select name="income_method" class="form-select">
+                <option value="all" {% if income_method=='all' %}selected{% endif %}>Tümü</option>
+                <option value="nakit" {% if income_method=='nakit' %}selected{% endif %}>Nakit</option>
+                <option value="çek" {% if income_method=='çek' %}selected{% endif %}>Çek</option>
+            </select>
+        </div>
+        <div class="col-md-2"><label class="form-label fw-semibold">Gelir - Durum</label>
+            <select name="income_status" class="form-select">
+                <option value="all" {% if income_status=='all' %}selected{% endif %}>Tümü</option>
+                <option value="ödendi" {% if income_status=='ödendi' %}selected{% endif %}>Ödendi</option>
+                <option value="kısmen" {% if income_status=='kısmen' %}selected{% endif %}>Kısmen Ödendi</option>
+                <option value="gecikmiş" {% if income_status=='gecikmiş' %}selected{% endif %}>Gecikmiş</option>
+                <option value="bekleniyor" {% if income_status=='bekleniyor' %}selected{% endif %}>Bekleniyor</option>
+                <option value="çek portföyde" {% if income_status=='çek portföyde' %}selected{% endif %}>Çek Portföyde</option>
+            </select>
+        </div>
+        <span></span>
+        <div class="col-md-3"><label class="form-label fw-semibold">Gider - Kime</label>
+            <select name="expense_party" class="form-select">
+                <option value="">Tümü</option>
+                {% for p in expense_parties %}
+                <option value="{{ p }}" {% if expense_party==p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2"><label class="form-label fw-semibold">Gider - Yöntem</label>
+            <select name="expense_method" class="form-select">
+                <option value="all" {% if expense_method=='all' %}selected{% endif %}>Tümü</option>
+                <option value="nakit" {% if expense_method=='nakit' %}selected{% endif %}>Nakit</option>
+                <option value="çek" {% if expense_method=='çek' %}selected{% endif %}>Çek</option>
+            </select>
+        </div>
+        <div class="col-md-2"><label class="form-label fw-semibold">Gider - Durum</label>
+            <select name="expense_status" class="form-select">
+                <option value="all" {% if expense_status=='all' %}selected{% endif %}>Tümü</option>
+                <option value="ödendi" {% if expense_status=='ödendi' %}selected{% endif %}>Ödendi</option>
+                <option value="kısmen" {% if expense_status=='kısmen' %}selected{% endif %}>Kısmen Ödendi</option>
+                <option value="gecikmiş" {% if expense_status=='gecikmiş' %}selected{% endif %}>Gecikmiş</option>
+                <option value="bekleniyor" {% if expense_status=='bekleniyor' %}selected{% endif %}>Bekleniyor</option>
+                <option value="çek portföyde" {% if expense_status=='çek portföyde' %}selected{% endif %}>Çek Portföyde</option>
+                <option value="çek verildi" {% if expense_status=='çek verildi' %}selected{% endif %}>Çek Verildi</option>
+            </select>
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+            <button type="submit" class="btn btn-primary me-2 w-100"><i class="fa-solid fa-filter me-1"></i>Filtrele</button>
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+            <a href="{{ url_for('project_overview', project_id=project_id) }}" class="btn btn-outline-secondary w-100"><i class="fa-solid fa-refresh me-1"></i>Temizle</a>
         </div>
     </form>
 </div>

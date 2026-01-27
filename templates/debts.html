@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
-    <style>
+<style>
         body { background-color: #f8f9fa; padding-top: 76px; }
         .card { border: none; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); transition: transform 0.2s ease-in-out; }
         .card:hover { transform: translateY(-5px); }
@@ -18,6 +18,9 @@
         .table-danger { --bs-table-bg: #f8d7da; --bs-table-color: #58151a; }
         .table-warning { --bs-table-bg: #fff3cd; --bs-table-color: #664d03; }
         .project-container .card { transition: all 0.3s ease-in-out; } /* Arama için */
+        /* Daha kompakt select görünümü */
+        #projectSelect, #flatSelect { max-height: 42px; }
+        #projectSelect option, #flatSelect option { padding: 8px 10px; }
     </style>
 </head>
 <body>
@@ -91,23 +94,50 @@
         <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Ana Sayfaya Dön</a>
     </div>
     
-    <div class="card mb-4 ">
+    <div class="card mb-3">
         <div class="card-body">
-            <input type="text" id="customerSearchInput" class="form-control" placeholder="Müşteri adına göre ara...">
+            <form id="filter-form" class="row g-3 align-items-end" method="GET" action="{{ url_for('debt_status') }}">
+                <div class="col-md-5">
+                    <label class="form-label fw-semibold">Proje seç</label>
+                    <select class="form-select" id="projectSelect" name="project_id">
+                        <option value="">Tüm projeler</option>
+                        {% for pid, pname in all_projects %}
+                        <option value="{{ pid }}" {% if selected_project_id and pid == selected_project_id %}selected{% endif %}>{{ pname }}</option>
+                        {% endfor %}
+                    </select>
+                    <small class="text-muted">Proje seçince daire listesi otomatik yüklenir.</small>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label fw-semibold">Daire seç</label>
+                    <select class="form-select" id="flatSelect" {% if not selected_project_id %}disabled{% endif %}>
+                        <option value="">Önce proje seçin</option>
+                    </select>
+                    <small class="text-muted">Açılır listeden seç; kaydırarak tüm daireleri görebilirsin.</small>
+                    <input type="hidden" name="flat_id" id="flat_id_field" value="{{ selected_flat_id or '' }}">
+                </div>
+                <div class="col-md-2">
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary" type="button" id="filterBtn">Filtrele</button>
+                        <button class="btn btn-outline-secondary" type="button" id="clearFilter">Temizle</button>
+                    </div>
+                </div>
+            </form>
         </div>
-        <div class="mx-3 my-1">
-            {% with messages = get_flashed_messages(with_categories=true) %}
-            {% for category, msg in messages %}
-            <div class="alert alert-{{category}} small p-2 mb-2">{{msg}}</div>
-            {% endfor %}
-            {% endwith %}
+        <div class="mx-3 my-3 d-flex flex-wrap gap-2">
+            {% if selected_project_name %}
+                <span class="badge bg-info text-dark">Proje: {{ selected_project_name }}</span>
+            {% endif %}
+            {% if selected_flat_desc %}
+                <span class="badge bg-success">Daire: {{ selected_flat_desc }}</span>
+            {% endif %}
         </div>
+
     </div>
 
     <div id="project-list">
         {% for project in projects_data %}
         <div class="card mb-5 project-container">
-            <div class="card-header bg-dark text-white">
+            <div class="card-header bg-secondary text-white">
                 <h4 class="mb-0"><i class="fa-solid fa-building me-2"></i>Proje: {{ project.project_name }} <span class="badge bg-secondary">{{ project.project_type }}</span></h4>
             </div>
 
@@ -132,7 +162,7 @@
             <div class="card-body p-lg-4">
                 {% for flat in project.flats %}
                     {% if project.project_type == 'normal' %}
-                    <div class="card mb-4 customer-card">
+                    <div class="card mb-4 customer-card" id="flat-{{ flat.flat_id }}">
                         <div class="card-header bg-light d-flex justify-content-between align-items-center flex-wrap">
                             <div>
                                 <strong class="me-3 customer-name"><i class="fa-solid fa-user text-muted"></i> {{ flat.customer_name }}</strong>
@@ -140,7 +170,8 @@
                             </div>
                             <div>
                                 <a href="{{ url_for('print_debt_statement', flat_id=flat.flat_id) }}" target="_blank" class="btn btn-secondary btn-sm me-2" title="Döküm Yazdır"><i class="fa-solid fa-print"></i> Yazdır</a>
-                                <a href="{{ url_for('manage_payment_plan', flat_id=flat.flat_id) }}" class="btn btn-info btn-sm" title="Planı Yönet"><i class="fa-solid fa-edit"></i> Planı Yönet</a>
+                                {% set return_url = url_for('debt_status', project_id=project.project_id, flat_id=flat.flat_id) ~ '#flat-' ~ flat.flat_id %}
+                                <a href="{{ url_for('manage_payment_plan', flat_id=flat.flat_id, next=return_url) }}" class="btn btn-info btn-sm" title="Planı Yönet"><i class="fa-solid fa-edit"></i> Planı Yönet</a>
                             </div>
                         </div>
                         <div class="card-body p-3">
@@ -170,7 +201,7 @@
                                         {# YENİ SÜTUN İÇERİĞİ #}
                                         <td class="text-center">
                                             {% if inst.status != 'Ödendi' %}
-                                                <a href="{{ url_for('new_payment', installment_id=inst.id) }}" class="btn btn-sm btn-success">
+                                                <a href="{{ url_for('new_payment', installment_id=inst.id, next=return_url) }}" class="btn btn-sm btn-success">
                                                     <i class="fa-solid fa-cash-register me-1"></i> Tahsilat Yap
                                                 </a>
                                             {% else %}
@@ -194,38 +225,49 @@
                             </div>
                             <div class="collapse mt-3" id="paymentHistory-{{ flat.flat_id }}">
                                 <div class="table-responsive">
-                                    <table class="table table-striped table-sm mb-0">
+                                    <table class="table table-sm mb-0">
                                         <thead>
                                             <tr>
                                                 <th>Ödeme Tarihi</th>
-                                                <th>Açıklama</th>
+                                                <th>Açıklama / Çek Detayı</th>
                                                 <th>Yöntem</th>
                                                 <th class="text-end">Tutar</th>
                                                 <th class="text-center">İşlemler</th>
                                             </tr>
                                         </thead>
-                                            <tbody>
-                                                {% for p_id, p_flat_id, p_date, p_desc, p_amount, p_method in flat.payments %}
-                                                <tr class="{% if p_method == 'çek' %}table-info{% endif %}">
-                                                    <td>{{ p_date.strftime('%d.%m.%Y') }}</td>
-                                                    <td>{{ p_desc }}</td>
-                                                    <td>
-                                                        {% if p_method == 'çek' %}
-                                                            <span class="badge bg-info text-dark"><i class="fa-solid fa-money-check-dollar me-1"></i> Çek</span>
-                                                        {% else %}
-                                                            <span class="badge bg-success"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
-                                                        {% endif %}
-                                                    </td>
-                                                    <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
-                                                    <td class="text-center">
-                                                        <a href="{{ url_for('edit_payment', payment_id=p_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
-                                                        <form action="{{ url_for('delete_payment', payment_id=p_id) }}" method="POST" class="d-inline">
-                                                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu ödemeyi silerseniz, ilgili taksitlerin durumu yeniden hesaplanacaktır. Emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
-                                                        </form>
-                                                    </td>
-                                                </tr>
-                                                {% endfor %}
-                                            </tbody>
+                                        <tbody>
+                                            {% for p_id, p_flat_id, p_date, p_desc, p_amount, p_method, p_status, p_bank, p_no, p_due in flat.payments %}
+                                            <tr class="{% if p_method == 'nakit' %}table-primary{% elif p_status == 'tahsil_edildi' %}table-success{% elif p_status == 'karsiliksiz' %}table-danger{% else %}table-warning{% endif %}">
+                                                <td>{{ p_date.strftime('%d.%m.%Y') }}</td>
+                                                <td>
+                                                    {{ p_desc }}
+                                                    {% if p_method == 'çek' %}
+                                                        <div class="small text-muted mt-1">
+                                                            <strong>Banka:</strong> {{ p_bank or '-' }} | 
+                                                            <strong>No:</strong> {{ p_no or '-' }} | 
+                                                            <strong>Vade:</strong> {{ p_due.strftime('%d.%m.%Y') if p_due else '-' }}
+                                                        </div>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if p_method == 'çek' %}
+                                                        <span class="badge {% if p_status == 'tahsil_edildi' %} bg-success {% elif p_status == 'karsiliksiz' %} bg-danger {% else %} bg-warning text-dark {% endif %}">
+                                                            <i class="fa-solid fa-money-check-dollar me-1"></i> Çek ({{ p_status|replace('_', ' ')|capitalize }})
+                                                        </span>
+                                                    {% else %}
+                                                        <span class="badge bg-primary"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
+                                                <td class="text-center">
+                                                    <a href="{{ url_for('edit_payment', payment_id=p_id, next=return_url) }}" class="btn btn-sm btn-outline-dark me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
+                                                    <form action="{{ url_for('delete_payment', payment_id=p_id) }}" method="POST" class="d-inline">
+                                                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu ödemeyi silerseniz, ilgili taksitlerin durumu yeniden hesaplanacaktır. Emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
                                     </table>
                                 </div>
                             </div>
@@ -263,31 +305,42 @@
                                 <div class="card-body p-0">
                                     {% if flat.payments %}
                                     <div class="table-responsive">
-                                        <table class="table table-striped table-sm mb-0">
+                                        <table class="table table-sm mb-0">
                                             <thead>
                                                 <tr>
                                                     <th>Ödeme Tarihi</th>
-                                                    <th>Açıklama</th>
+                                                    <th>Açıklama / Çek Detayı</th>
                                                     <th>Yöntem</th>
                                                     <th class="text-end">Tutar</th>
                                                     <th class="text-center">İşlemler</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {% for p_id, p_flat_id, p_date, p_desc, p_amount, p_method in flat.payments %}
-                                                <tr class="{% if p_method == 'çek' %}table-info{% endif %}">
+                                                {% for p_id, p_flat_id, p_date, p_desc, p_amount, p_method, p_status, p_bank, p_no, p_due in flat.payments %}
+                                                <tr class="{% if p_method == 'nakit' %}table-primary{% elif p_status == 'tahsil_edildi' %}table-success{% elif p_status == 'karsiliksiz' %}table-danger{% else %}table-warning{% endif %}">
                                                     <td>{{ p_date.strftime('%d.%m.%Y') }}</td>
-                                                    <td>{{ p_desc }}</td>
+                                                    <td>
+                                                        {{ p_desc }}
+                                                        {% if p_method == 'çek' %}
+                                                            <div class="small text-muted mt-1">
+                                                                <strong>Banka:</strong> {{ p_bank or '-' }} | 
+                                                                <strong>No:</strong> {{ p_no or '-' }} | 
+                                                                <strong>Vade:</strong> {{ p_due.strftime('%d.%m.%Y') if p_due else '-' }}
+                                                            </div>
+                                                        {% endif %}
+                                                    </td>
                                                     <td>
                                                         {% if p_method == 'çek' %}
-                                                            <span class="badge bg-info text-dark"><i class="fa-solid fa-money-check-dollar me-1"></i> Çek</span>
+                                                            <span class="badge {% if p_status == 'tahsil_edildi' %} bg-success {% elif p_status == 'karsiliksiz' %} bg-danger {% else %} bg-warning text-dark {% endif %}">
+                                                                <i class="fa-solid fa-money-check-dollar me-1"></i> Çek ({{ p_status|replace('_', ' ')|capitalize }})
+                                                            </span>
                                                         {% else %}
-                                                            <span class="badge bg-success"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
+                                                            <span class="badge bg-primary"><i class="fa-solid fa-money-bill me-1"></i> Nakit</span>
                                                         {% endif %}
                                                     </td>
                                                     <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
                                                     <td class="text-center">
-                                                        <a href="{{ url_for('edit_payment', payment_id=p_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
+                                                        <a href="{{ url_for('edit_payment', payment_id=p_id, next=return_url) }}" class="btn btn-sm btn-outline-dark me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
                                                         <form action="{{ url_for('delete_payment', payment_id=p_id) }}" method="POST" class="d-inline">
                                                             <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu ödemeyi silerseniz, ilgili taksitlerin durumu yeniden hesaplanacaktır. Emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
                                                         </form>
@@ -313,6 +366,85 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+        const projectSelect = document.getElementById('projectSelect');
+        const flatSelect = document.getElementById('flatSelect');
+        const flatIdField = document.getElementById('flat_id_field');
+        const filterForm = document.getElementById('filter-form');
+        let flatsPromise = null;
+
+        function syncProject(fromUser = true) {
+            const projectId = projectSelect.value;
+            if (projectId) {
+                if (fromUser) { // proje değiştiyse daireyi temizle
+                    flatIdField.value = '';
+                    flatSelect.value = '';
+                }
+                flatSelect.disabled = false;
+                flatsPromise = loadFlats(projectId, flatIdField.value);
+            } else {
+                flatIdField.value = '';
+                flatSelect.innerHTML = '<option value=\"\">Önce proje seçin</option>';
+                flatSelect.disabled = true;
+            }
+        }
+
+        function loadFlats(projectId, preselectId) {
+            flatSelect.innerHTML = '<option value=\"\">Yükleniyor...</option>';
+            return fetch(`/api/project/${projectId}/flats`)
+                .then(r => r.json())
+                .then(data => {
+                    flatSelect.innerHTML = '';
+                    const placeholder = document.createElement('option');
+                    placeholder.value = '';
+                    placeholder.textContent = 'Daire seçin...';
+                    flatSelect.appendChild(placeholder);
+                    (data || []).forEach(f => {
+                        const opt = document.createElement('option');
+                        opt.value = f.id;
+                        opt.textContent = f.text;
+                        flatSelect.appendChild(opt);
+                    });
+                    if (preselectId) {
+                        flatSelect.value = preselectId;
+                        flatIdField.value = preselectId;
+                    }
+                    flatSelect.disabled = false;
+                })
+                .catch(() => {
+                    flatSelect.innerHTML = '<option value=\"\">Daireler yüklenemedi</option>';
+                });
+        }
+
+        function syncFlat() {
+            flatIdField.value = flatSelect.value || '';
+        }
+
+        if (projectSelect) projectSelect.addEventListener('change', () => syncProject(true));
+        if (flatSelect) flatSelect.addEventListener('change', syncFlat);
+
+        document.getElementById('filterBtn').addEventListener('click', async () => {
+            // Kullanıcı metin girdi ise de datalist eşleşmesini zorla
+            syncProject(false);
+            if (flatsPromise) {
+                try { await flatsPromise; } catch(e){}
+            }
+            syncFlat();
+            filterForm.submit();
+        });
+
+        document.getElementById('clearFilter').addEventListener('click', () => {
+            projectSelect.value = '';
+            flatIdField.value = '';
+            flatSelect.innerHTML = '<option value=\"\">Önce proje seçin</option>';
+            flatSelect.disabled = true;
+            filterForm.submit();
+        });
+
+        // Prefill flats when page opens with existing project_id
+        if (projectSelect && projectSelect.value) {
+            flatsPromise = loadFlats(projectSelect.value, flatIdField.value);
+        }
+
         document.getElementById('customerSearchInput').addEventListener('input', function() {
             const searchTerm = this.value.toLowerCase().trim();
             document.querySelectorAll('.project-container').forEach(container => {
