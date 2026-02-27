@@ -145,13 +145,19 @@
             </div>
             <div class="table-responsive">
                 <table class="table table-bordered table-hover align-middle table-sm">
-                    <thead class="table-secondary"><tr><th>Vade Tarihi</th><th class="text-end">Taksit Tutarı</th><th class="text-end">Kalan</th><th class="text-center">Durum</th><th class="text-center">Ödeme Yap</th></tr></thead>
+                    <thead class="table-secondary"><tr><th>Vade Tarihi</th><th class="text-end">Taksit Tutarı</th><th class="text-end">Kalan</th><th class="text-center">Durum</th><th class="text-center">Ödeme Yap / Çek Durumu</th></tr></thead>
                     <tbody>
                         {% for installment in expense.installments %}
                         <tr class="{{ installment.css_class }}">
                             <td>{{ installment.due_date.strftime('%d.%m.%Y') }}</td><td class="text-end fw-bold">{{ installment.total_amount|thousands }} ₺</td><td class="text-end fw-bold text-danger">{{ installment.remaining_installment_due|thousands }} ₺</td>
                             <td class="text-center"><span class="badge {% if installment.status == 'Ödendi' %} bg-success {% elif 'Kısmen' in installment.status %} bg-warning text-dark {% elif installment.status == 'Gecikmiş' %} bg-danger {% else %} bg-secondary {% endif %}">{{ installment.status }}</span></td>
-                            <td class="text-center">{% if not installment.is_paid %}<a href="{{ url_for('pay_expense_installment', installment_id=installment.id, next=return_url) }}" class="btn btn-sm btn-success"><i class="fa-solid fa-cash-register me-1"></i> Öde</a>{% else %}<i class="fa-solid fa-check-circle text-success fs-5"></i>{% endif %}</td>
+                            <td class="text-center">
+                                {% if not installment.is_paid %}
+                                    <a href="{{ url_for('pay_expense_installment', installment_id=installment.id, next=return_url) }}" class="btn btn-sm btn-success"><i class="fa-solid fa-cash-register me-1"></i> Öde</a>
+                                {% else %}
+                                    <i class="fa-solid fa-check-circle text-success fs-5"></i>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% else %}
                         <tr><td colspan="5" class="text-center text-muted p-2 small">Ödeme planı oluşturulmamış.</td></tr>
@@ -171,28 +177,65 @@
                             <th>Açıklama</th>
                             <th>Yöntem</th>
                             <th class="text-end">Tutar</th>
-                            <th class="text-center">İşlemler</th>
+                            <th class="text-center">İşlemler / Çek Durumu</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for p_exp_id, p_id, p_date, p_desc, p_amount, p_method in expense.payments %}
-                        <tr>
+                        {% for pay in expense.payments %}
+                        {% set p_exp_id = pay[0] %}
+                        {% set p_id = pay[1] %}
+                        {% set p_date = pay[2] %}
+                        {% set p_desc = pay[3] %}
+                        {% set p_amount = pay[4] %}
+                        {% set p_method = pay[5] %}
+                        {% set p_check_id = pay[6] if pay|length > 6 else None %}
+                        {% set p_status = pay[7] if pay|length > 7 else None %}
+                        {% set p_check_no = pay[8] if pay|length > 8 else None %}
+                        {% set p_check_due = pay[9] if pay|length > 9 else None %}
+                        {% set p_bank_name = pay[10] if pay|length > 10 else None %}
+                        <tr class="{% if p_method == 'nakit' %}table-primary{% elif p_status == 'odendi' %}table-success{% elif p_status == 'verildi' %}table-warning{% else %}table-warning{% endif %}">
                             <td>{{ p_date.strftime('%d.%m.%Y') }}</td>
                             <td>{{ p_desc or '-' }}</td>
                             <td>
                                 {% if p_method == 'çek' %}
-                                    <span class="badge bg-info text-dark">Çek</span>
+                                    <span class="badge {% if p_status == 'odendi' %} bg-success {% elif p_status == 'verildi' %} text-dark bg-warning {% else %} bg-warning text-dark {% endif %}">
+                                        <i class="fa-solid fa-money-check-dollar me-1"></i> Çek ({{ p_status|replace('_', ' ')|capitalize }})                                        
+
+                                    </span>                                        
+                                    <div class="small text-muted mt-1">
+                                        <strong>Banka: </strong> {{  p_bank_name or '-' }} | 
+                                        <strong>No: </strong>{{ p_check_no or p_check_id }} | 
+                                        <strong>Vade: </strong>{{p_check_due.strftime('%d.%m.%Y') if p_check_due else '-' }}
+                                    </div>
                                 {% else %}
-                                    <span class="badge bg-success">Nakit</span>
+                                    <span class="badge bg-primary">Nakit</span>
                                 {% endif %}
                             </td>
                             <td class="text-end fw-bold">{{ p_amount|thousands }} ₺</td>
                             <td class="text-center">
-                                <a href="{{ url_for('edit_supplier_payment', payment_id=p_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
-                                <form action="{{ url_for('delete_supplier_payment', payment_id=p_id) }}" method="POST" class="d-inline">
-                                    <input type="hidden" name="project_id" value="{{ project_id }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu ödemeyi silmek istediğinizden emin misiniz? Bu işlem ilgili taksitlerin durumunu yeniden hesaplayacaktır.')" title="Sil"><i class="fa-solid fa-trash"></i></button>
-                                </form>
+                                <div class="d-flex justify-content-center align-items-center gap-2 flex-wrap">
+                                    <a href="{{ url_for('edit_supplier_payment', payment_id=p_id, next=return_url) }}" class="btn btn-sm btn-outline-primary" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
+                                    <form action="{{ url_for('delete_supplier_payment', payment_id=p_id) }}" method="POST" class="d-inline" onsubmit="return confirm('Bu ödemeyi silmek istediğinizden emin misiniz? Bu işlem ilgili taksitlerin durumunu yeniden hesaplayacaktır.');">
+                                        <input type="hidden" name="project_id" value="{{ project_id }}">
+                                        <input type="hidden" name="next" value="{{ return_url }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Sil"><i class="fa-solid fa-trash"></i></button>
+                                    </form>
+                                    {% if p_method == 'çek' and p_check_id %}
+                                        <div class="d-flex flex-column align-items-center gap-1">
+                                            {% if p_status == 'verildi' %}
+                                            <div class="btn-group btn-group-sm w-100" role="group">
+                                                <form action="{{ url_for('update_check_status') }}" method="POST" class="d-inline" onsubmit="return confirm('Çeki ÖDENDİ işaretlemek istediğinize emin misiniz?');">
+                                                    <input type="hidden" name="check_id" value="{{ p_check_id }}">
+                                                    <input type="hidden" name="check_type" value="outgoing">
+                                                    <input type="hidden" name="new_status" value="odendi">
+                                                    <input type="hidden" name="next" value="{{ return_url }}">
+                                                    <button type="submit" class="btn btn-success w-100">Ödendi olarak işaretle</button>
+                                                </form>
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                    {% endif %}
+                                </div>
                             </td>
                         </tr>
                         {% else %}

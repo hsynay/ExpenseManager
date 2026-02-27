@@ -11,6 +11,7 @@
             </div>
             <div class="card-body p-4">
                 <form method="POST" action="{{ url_for('add_expense', project_id=project_id) }}">
+                    <input type="hidden" name="plan_json" id="plan_json">
                     <div class="mb-3">
                         <label for="title" class="form-label fw-semibold">Gider Başlığı (*)</label>
                         <input type="text" class="form-control" id="title" name="title" placeholder="Örn: Beton Alımı, Hafriyat Hizmeti" required>
@@ -135,6 +136,18 @@
         // --- 4. Form Submit: Temizlik ---
         const form = document.querySelector('form');
         form.addEventListener('submit', function() {
+            // Satırları JSON'a topla
+            const rows = [];
+            form.querySelectorAll('.installment-row').forEach(function(row) {
+                const d = row.querySelector('input[name="installment_due_date[]"]')?.value;
+                let a = row.querySelector('input[name="installment_amount[]"]')?.value || '';
+                if (d && a) {
+                    a = a.replace(/\./g, '').replace(',', '.');
+                    rows.push({due_date: d, amount: a});
+                }
+            });
+            document.getElementById('plan_json').value = JSON.stringify(rows);
+            // Eski inputları temizle (gerekirse backend fallback için)
             form.querySelectorAll('.thousands-input').forEach(function(inp) {
                 let v = inp.value || '';
                 inp.value = v.replace(/\./g, '').replace(',', '.'); 
