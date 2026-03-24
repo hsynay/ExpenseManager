@@ -90,7 +90,34 @@
         </div>
         <div class="card-body table-responsive p-0">
             <table class="table table-sm table-striped table-hover mb-0">
-                <thead><tr><th>Tarih</th><th>Açıklama</th><th class="text-end">Tutar</th><th class="text-end">İşlemler</th></tr></thead>
+                <thead class="table-light">
+                    <tr>
+                        <th>
+                            {% set next_date_order = 'asc' if pc_sort == 'date' and pc_order == 'desc' else 'desc' %}
+                            <a href="{{ url_for('list_expenses', project_id=project_id, expense_type=expense_type, title=title_filter, supplier_id=supplier_id, pc_sort='date', pc_order=next_date_order) }}#filterForm" class="text-dark text-decoration-none">
+                                Tarih
+                                {% if pc_sort == 'date' %}
+                                    <i class="fa-solid fa-sort-{{ 'down' if pc_order == 'desc' else 'up' }} ms-1"></i>
+                                {% else %}
+                                    <i class="fa-solid fa-sort text-muted ms-1"></i>
+                                {% endif %}
+                            </a>
+                        </th>
+                        <th>Açıklama</th>
+                        <th class="text-end">
+                            {% set next_amount_order = 'asc' if pc_sort == 'amount' and pc_order == 'desc' else 'desc' %}
+                            <a href="{{ url_for('list_expenses', project_id=project_id, expense_type=expense_type, title=title_filter, supplier_id=supplier_id, pc_sort='amount', pc_order=next_amount_order) }}#filterForm" class="text-dark text-decoration-none">
+                                Tutar
+                                {% if pc_sort == 'amount' %}
+                                    <i class="fa-solid fa-sort-{{ 'down' if pc_order == 'desc' else 'up' }} ms-1"></i>
+                                {% else %}
+                                    <i class="fa-solid fa-sort text-muted ms-1"></i>
+                                {% endif %}
+                            </a>
+                        </th>
+                        <th class="text-end">İşlemler</th>
+                    </tr>
+                </thead>
                 <tbody>
                     {% for item in petty_cash_items %}
                     <tr>
