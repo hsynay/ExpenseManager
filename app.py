@@ -243,11 +243,16 @@ def list_expenses():
     supplier_id_str = request.args.get('supplier_id')
     current_query = request.query_string.decode() if request.query_string else ""
     
+    # --- SIRALAMA PARAMETRELERİ ---
+    pc_sort = request.args.get('pc_sort', 'date')
+    pc_order = request.args.get('pc_order', 'desc')
+    if pc_order not in ['asc', 'desc']:
+        pc_order = 'desc'
+
     # Proje listesini her zaman çekiyoruz
     cur.execute("SELECT id, name FROM projects ORDER BY name")
     all_projects = cur.fetchall()
 
-    # Eğer bir proje ID'si gelmemişse veya 'all' seçilmişse, sadece seçim ekranını göster
     if not project_id_str or project_id_str == 'all':
         cur.close()
         conn.close()
@@ -257,14 +262,15 @@ def list_expenses():
                                selected_project_id=None,
                                user_name=session.get('user_name'))
 
-    # Eğer bir proje ID'si gelmişse, o projenin detaylarını göster
+    expenses_data, petty_cash_items = [], []
+    project_name = ""
+    total_project_expense, total_paid_project, total_remaining_due = Decimal(0), Decimal(0), Decimal(0)
+    total_petty_cash_expense = Decimal(0)
+    supplier_list = []
+    large_titles, petty_titles = [], []
+
     try:
         project_id = int(project_id_str)
-        expenses_data, petty_cash_items = [], []
-        project_name = ""
-        total_project_expense, total_paid_project, total_remaining_due = Decimal(0), Decimal(0), Decimal(0)
-        supplier_list = []
-        expense_titles = []
 
         cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
         project_name = cur.fetchone()[0]
@@ -322,7 +328,7 @@ def list_expenses():
             cur.execute(expenses_sql, tuple(expenses_params))
             expenses_raw = cur.fetchall()
 
-        # Küçük giderler
+        # --- DÜZELTİLEN KISIM: Küçük giderler (Python Tarafında %100 Garanti Sıralama) ---
         if expense_type in ('all', 'petty'):
             petty_sql = """
                 SELECT id, title, amount, expense_date, description
@@ -333,13 +339,22 @@ def list_expenses():
             if title_filter:
                 petty_sql += " AND title ILIKE %s"
                 petty_params.append(f"%{title_filter}%")
-            petty_sql += " ORDER BY expense_date DESC"
+            
             cur.execute(petty_sql, tuple(petty_params))
-            petty_cash_items = cur.fetchall()
+            raw_petty = cur.fetchall()
+
+            # Python ile kesin sıralama: x[3] senin girdiğin "Harcama Tarihi"dir (expense_date)
+            is_reverse = (pc_order == 'desc')
+            if pc_sort == 'amount':
+                # Tutara göre sırala
+                petty_cash_items = sorted(raw_petty, key=lambda x: (x[2], x[3], x[0]), reverse=is_reverse)
+            else:
+                # Kullanıcının Girdiği Tarihe Göre (x[3]) sırala
+                petty_cash_items = sorted(raw_petty, key=lambda x: (x[3], x[0]), reverse=is_reverse)
         else:
             petty_cash_items = []
 
-        # YENİ EKLENEN KISIM: Küçük Giderlerin Toplamını Hesapla
+        # Küçük Giderlerin Toplamını Hesapla
         total_petty_cash_expense = sum(item[2] for item in petty_cash_items)
 
         # Özet Hesaplamaları
@@ -372,18 +387,13 @@ def list_expenses():
                     'remaining_installment_due': inst_amount - paid_amount,
                     'status': status, 'css_class': css_class, 'is_paid': is_paid
                 })
-            # *** YENİ EKLENECEK SATIR ***
-            # Gider taksitlerini de Python tarafında sıralayalım
+            
+            # Gider taksitlerini Python tarafında sıralayalım
             expense_dict['installments'].sort(key=lambda x: x['due_date'])
             expenses_data.append(expense_dict)
             
     except Exception as e:
         flash(f"Giderler listelenirken bir hata oluştu: {e}", "danger")
-        expenses_data, petty_cash_items = [], [] # Hata durumunda listeleri boşalt
-        supplier_list = []
-        expense_titles = []
-        large_titles = []
-        petty_titles = []
     finally:
         cur.close()
         conn.close()
@@ -392,7 +402,7 @@ def list_expenses():
                            detailed_view=True, project_id=project_id, project_name=project_name,
                            expenses_data=expenses_data, 
                            petty_cash_items=petty_cash_items,
-                           total_petty_cash_expense=total_petty_cash_expense, # YENİ: Toplamı şablona gönder
+                           total_petty_cash_expense=total_petty_cash_expense,
                            total_project_expense=total_project_expense,
                            total_paid_project=total_paid_project,
                            total_remaining_due=total_remaining_due,
@@ -404,7 +414,11 @@ def list_expenses():
                            large_titles=large_titles,
                            petty_titles=petty_titles,
                            current_query=current_query,
+                           pc_sort=pc_sort,            
+                           pc_order=pc_order,
                            user_name=session.get('user_name'))
+
+
 # Bu fonksiyon artık ana giriş noktasıdır.
 @app.route('/expenses/select')
 def select_project_for_expenses():
@@ -646,6 +660,93 @@ def new_supplier_payment():
                            user_name=session.get('user_name'))
 
 
+# @app.route('/project/<int:project_id>/expense/new', methods=['GET', 'POST'])
+# def add_expense(project_id):
+#     if 'user_id' not in session:
+#         return redirect(url_for('login'))
+
+#     conn = get_connection()
+#     cur = conn.cursor()
+
+#     if request.method == 'POST':
+#         try:
+#             title = request.form['title']
+#             description = request.form.get('description', '')
+            
+#             # Tedarikçi işlemleri
+#             supplier_option = request.form.get('supplier_option')
+#             supplier_id = None
+#             if supplier_option == 'new':
+#                 new_supplier_name = request.form.get('new_supplier_name')
+#                 if not new_supplier_name: raise ValueError("Yeni tedarikçi adı zorunludur.")
+#                 cur.execute(
+#                     "INSERT INTO suppliers (name, project_id, category) VALUES (%s, %s, %s) RETURNING id",
+#                     (new_supplier_name, project_id, request.form.get('new_supplier_category'))
+#                 )
+#                 supplier_id = cur.fetchone()[0]
+#             else:
+#                 supplier_id_val = request.form.get('supplier_id')
+#                 if not supplier_id_val: raise ValueError("Lütfen bir tedarikçi seçin.")
+#                 supplier_id = int(supplier_id_val)
+
+#             # Taksit verilerini al
+#             due_dates = request.form.getlist('installment_due_date[]')
+#             amounts_str = request.form.getlist('installment_amount[]')
+            
+#             # Toplam tutarı taksitlerden hesapla
+#             valid_installments = []
+#             total_amount = Decimal(0)
+            
+#             for d_str, a_str in zip(due_dates, amounts_str):
+#                 if d_str and a_str:
+#                     amt = Decimal(a_str)
+#                     total_amount += amt
+#                     valid_installments.append((d_str, amt))
+            
+#             if not valid_installments:
+#                 raise ValueError("En az bir taksit/ödeme girişi yapılmalıdır.")
+
+#             # 1. Ana gider kaydını oluştur
+#             cur.execute(
+#                 "INSERT INTO expenses (project_id, title, amount, expense_date, description, supplier_id) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+#                 (project_id, title, total_amount, datetime.now().date(), description, supplier_id)
+#             )
+#             expense_id = cur.fetchone()[0]
+
+#             # 2. Taksitleri (Ödeme Planını) kaydet
+#             for d_str, amt in valid_installments:
+#                 due_date = datetime.strptime(d_str, '%Y-%m-%d').date()
+#                 cur.execute(
+#                     "INSERT INTO expense_schedule (expense_id, due_date, amount) VALUES (%s, %s, %s)",
+#                     (expense_id, due_date, amt)
+#                 )
+            
+#             conn.commit()
+#             flash('Yeni gider ve ödeme planı başarıyla tanımlandı.', 'success')
+#             return redirect(url_for('list_expenses', project_id=project_id))
+
+#         except Exception as e:
+#             conn.rollback()
+#             flash(f'Gider eklenirken bir hata oluştu: {e}', 'danger')
+#         finally:
+#             cur.close()
+#             conn.close()
+#         return redirect(url_for('add_expense', project_id=project_id))
+
+#     # GET Metodu
+#     cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
+#     project = cur.fetchone()
+#     cur.execute("SELECT id, name FROM suppliers WHERE project_id = %s ORDER BY name", (project_id,))
+#     suppliers = cur.fetchall()
+#     cur.close()
+#     conn.close()
+
+#     return render_template('new_expense.html', 
+#                            project_name=project[0], 
+#                            project_id=project_id,
+#                            suppliers=suppliers,
+#                            user_name=session.get('user_name'))
+
 @app.route('/project/<int:project_id>/expense/new', methods=['GET', 'POST'])
 def add_expense(project_id):
     if 'user_id' not in session:
@@ -675,22 +776,38 @@ def add_expense(project_id):
                 if not supplier_id_val: raise ValueError("Lütfen bir tedarikçi seçin.")
                 supplier_id = int(supplier_id_val)
 
-            # Taksit verilerini al
-            due_dates = request.form.getlist('installment_due_date[]')
-            amounts_str = request.form.getlist('installment_amount[]')
-            
-            # Toplam tutarı taksitlerden hesapla
+            # --- DÜZELTİLEN KISIM: JSON İLE TAKSİTLERİ ALMA ---
+            plan_json = request.form.get('plan_json')
             valid_installments = []
             total_amount = Decimal(0)
-            
-            for d_str, a_str in zip(due_dates, amounts_str):
-                if d_str and a_str:
-                    amt = Decimal(a_str)
-                    total_amount += amt
-                    valid_installments.append((d_str, amt))
-            
+
+            if plan_json:
+                rows_raw = json.loads(plan_json)
+                for row in rows_raw:
+                    d_str = (row.get('due_date') or "").strip()
+                    a_str = (row.get('amount') or "").strip()
+                    if d_str and a_str:
+                        due_date = datetime.strptime(d_str, '%Y-%m-%d').date()
+                        # JavaScript zaten temizlemişti, doğrudan Decimal'e çevirebiliriz
+                        amt = Decimal(a_str) 
+                        total_amount += amt
+                        valid_installments.append((due_date, amt))
+            else:
+                # JSON gelmezse (Fallback / Güvenlik için eski yöntem)
+                due_dates = request.form.getlist('installment_due_date[]')
+                amounts_str = request.form.getlist('installment_amount[]')
+                for d_str, a_str in zip_longest(due_dates, amounts_str, fillvalue=""):
+                    if d_str and a_str:
+                        due_date = datetime.strptime(d_str, '%Y-%m-%d').date()
+                        amt = Decimal(a_str.replace(' ', '').replace('.', '').replace(',', '.'))
+                        total_amount += amt
+                        valid_installments.append((due_date, amt))
+
             if not valid_installments:
                 raise ValueError("En az bir taksit/ödeme girişi yapılmalıdır.")
+
+            # *** KRİTİK: Taksitleri veri tabanına yazmadan önce KESİNLİKLE kronolojik sıraya sok ***
+            valid_installments.sort(key=lambda x: x[0])
 
             # 1. Ana gider kaydını oluştur
             cur.execute(
@@ -699,11 +816,10 @@ def add_expense(project_id):
             )
             expense_id = cur.fetchone()[0]
 
-            # 2. Taksitleri (Ödeme Planını) kaydet
-            for d_str, amt in valid_installments:
-                due_date = datetime.strptime(d_str, '%Y-%m-%d').date()
+            # 2. Taksitleri (Ödeme Planını) sırasıyla kaydet
+            for due_date, amt in valid_installments:
                 cur.execute(
-                    "INSERT INTO expense_schedule (expense_id, due_date, amount) VALUES (%s, %s, %s)",
+                    "INSERT INTO expense_schedule (expense_id, due_date, amount, is_paid, paid_amount) VALUES (%s, %s, %s, FALSE, 0)",
                     (expense_id, due_date, amt)
                 )
             
@@ -767,22 +883,27 @@ def pay_expense_installment(installment_id):
             expense_info_data = cur.fetchone()
             project_id, supplier_id = expense_info_data
             
-            outgoing_check_id = None
             if payment_method == 'çek':
                 due_date_str = request.form.get('check_due_date')
                 if not due_date_str: raise ValueError("Çek için vade tarihi zorunludur.")
                 due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()
+                
+                # 1. Çeki kaydet
                 cur.execute(
                     "INSERT INTO outgoing_checks (supplier_id, bank_name, check_number, amount, issue_date, due_date) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
                     (supplier_id, request.form.get('check_bank_name'), request.form.get('check_number'), payment_amount, payment_date, due_date)
                 )
                 outgoing_check_id = cur.fetchone()[0]
+                
+                # 2. Çek ödemesini supplier_payments tablosuna bağla
+                cur.execute(
+                    "INSERT INTO supplier_payments (expense_id, supplier_id, amount, payment_date, payment_method, description, check_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (expense_id, supplier_id, payment_amount, payment_date, payment_method, description, outgoing_check_id)
+                )
                 flash(f'Çek başarıyla kaydedildi. Taksit, çek ödendiğinde güncellenecektir.', 'info')
             
-            # pay_expense_installment fonksiyonu içindeki 'else' (nakit ödeme) kısmını şöyle değiştirin:
             else: 
-                # Nakit ödemeyi kaydet, ancak taksit tablosunu (expense_schedule) 
-                # elle güncellemek yerine yardımcı fonksiyonu çağır.
+                # Sadece nakit ödemeyi kaydet
                 cur.execute(
                     "INSERT INTO supplier_payments (expense_id, supplier_id, amount, payment_date, payment_method, description) VALUES (%s, %s, %s, %s, %s, %s)",
                     (expense_id, supplier_id, payment_amount, payment_date, 'nakit', description)
@@ -790,10 +911,7 @@ def pay_expense_installment(installment_id):
                 reconcile_supplier_payments(cur, expense_id)
                 flash("Nakit ödeme başarıyla kaydedildi.", "success")
 
-            cur.execute(
-                "INSERT INTO supplier_payments (expense_id, supplier_id, amount, payment_date, payment_method, description, check_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (expense_id, supplier_id, payment_amount, payment_date, payment_method, description, outgoing_check_id)
-            )
+            # MÜKERRER KAYIT YAPAN ORTAK INSERT BURADAN KALDIRILDI!
             
             conn.commit()
             return redirect(next_url or url_for('list_expenses', project_id=project_id))
