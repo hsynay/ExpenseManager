@@ -249,4 +249,4 @@ We welcome contributions! Please follow these steps:
 
 <div align="center">
 
-**⭐ If you like this project, don't forget to give it a star!**
+**⭐ If you like this project, don't forget to give it a star**
