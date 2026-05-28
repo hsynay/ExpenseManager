@@ -272,6 +272,18 @@ def list_expenses():
     try:
         project_id = int(project_id_str)
 
+        # --- KRİTİK HATA ÇÖZÜMÜ: 42026 gibi yanlış yılları otomatik düzeltip çöküşü önler ---
+        try:
+            cur.execute("""
+                UPDATE petty_cash_expenses SET expense_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM expense_date) > 3000;
+                UPDATE expense_schedule SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
+                UPDATE expenses SET expense_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM expense_date) > 3000;
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        # ------------------------------------------------------------------------------------
+
         cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
         project_name = cur.fetchone()[0]
 
@@ -328,7 +340,7 @@ def list_expenses():
             cur.execute(expenses_sql, tuple(expenses_params))
             expenses_raw = cur.fetchall()
 
-        # --- DÜZELTİLEN KISIM: Küçük giderler (Python Tarafında %100 Garanti Sıralama) ---
+        # Küçük giderler
         if expense_type in ('all', 'petty'):
             petty_sql = """
                 SELECT id, title, amount, expense_date, description
@@ -343,21 +355,17 @@ def list_expenses():
             cur.execute(petty_sql, tuple(petty_params))
             raw_petty = cur.fetchall()
 
-            # Python ile kesin sıralama: x[3] senin girdiğin "Harcama Tarihi"dir (expense_date)
+            # Python ile kesin sıralama
             is_reverse = (pc_order == 'desc')
             if pc_sort == 'amount':
-                # Tutara göre sırala
                 petty_cash_items = sorted(raw_petty, key=lambda x: (x[2], x[3], x[0]), reverse=is_reverse)
             else:
-                # Kullanıcının Girdiği Tarihe Göre (x[3]) sırala
                 petty_cash_items = sorted(raw_petty, key=lambda x: (x[3], x[0]), reverse=is_reverse)
         else:
             petty_cash_items = []
 
-        # Küçük Giderlerin Toplamını Hesapla
         total_petty_cash_expense = sum(item[2] for item in petty_cash_items)
 
-        # Özet Hesaplamaları
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
         total_planned_expense = cur.fetchone()[0]
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s", (project_id,))
@@ -388,7 +396,6 @@ def list_expenses():
                     'status': status, 'css_class': css_class, 'is_paid': is_paid
                 })
             
-            # Gider taksitlerini Python tarafında sıralayalım
             expense_dict['installments'].sort(key=lambda x: x['due_date'])
             expenses_data.append(expense_dict)
             
@@ -2072,14 +2079,25 @@ def project_overview(project_id):
     expense_parties = []
 
     try:
+        # --- HATA ÇÖZÜMÜ: 42026 gibi yanlış yılları otomatik düzeltip çöküşü önler ---
+        try:
+            cur.execute("""
+                UPDATE payments SET payment_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM payment_date) > 3000;
+                UPDATE supplier_payments SET payment_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM payment_date) > 3000;
+                UPDATE outgoing_checks SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
+                UPDATE checks SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
+                UPDATE installment_schedule SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        # ------------------------------------------------------------------------------------
+
         cur.execute("SELECT name, project_type FROM projects WHERE id = %s", (project_id,))
         project_info = cur.fetchone()
         project_name, project_type = project_info
 
-        # --- ÖZET KARTI HESAPLAMALARI (Doğru haliyle) ---
-        # --- ÖZET KARTI HESAPLAMALARI ---
         if project_type == 'normal':
-            # GELİR: Sadece nakit ve tahsil edilmiş çekleri topla
             cur.execute("""
                 SELECT COALESCE(SUM(p.amount), 0) 
                 FROM payments p 
@@ -2093,7 +2111,6 @@ def project_overview(project_id):
             total_planned_income = cur.fetchone()[0]
             total_unpaid_income = total_planned_income - total_paid_income
         
-        # GİDER: Sadece nakit ve 'odendi' durumundaki firma çeklerini topla
         cur.execute("""
             SELECT COALESCE(SUM(sp.amount), 0) 
             FROM supplier_payments sp 
@@ -2109,7 +2126,6 @@ def project_overview(project_id):
         total_planned_large_expense = cur.fetchone()[0]
         total_unpaid_expense = (total_planned_large_expense + paid_petty_cash) - total_paid_expense
 
-        # --- GELİR TABLOSU VERİLERİ (Önceki doğru haliyle) ---
         if project_type == 'normal':
             income_query = """
                 WITH flat_payment_summary AS (
@@ -2142,10 +2158,10 @@ def project_overview(project_id):
                     else: status, status_class, payment_method = "Çek Portföyde", "bg-warning text-dark", "çek"
                 elif paid_this_installment > 0: 
                     status, status_class = "Kısmen Ödendi", "bg-info text-dark"
-                    payment_method = None # Ödenmemişse yöntem olmaz
+                    payment_method = None
                 else: 
                     status, status_class = ("Gecikmiş", "bg-danger") if due_date < today else ("Bekleniyor", "bg-secondary")
-                    payment_method = None # Ödenmemişse yöntem olmaz
+                    payment_method = None
                 income_items.append({
                     'date': due_date,
                     'description': "Daire Satış Taksiti",
@@ -2157,7 +2173,6 @@ def project_overview(project_id):
                     'payment_method': payment_method
                 })
         
-        # --- GİDER TABLOSU VERİLERİ (DÜZELTİLMİŞ MANTIK İLE) ---
         expense_query = """
             WITH expense_payment_summary AS (
                 SELECT sp.expense_id,
@@ -2193,29 +2208,26 @@ def project_overview(project_id):
             paid_so_far = max(0, total_valid_payments - (cumulative_amount - amount))
             paid_this_installment = min(amount, paid_so_far)
             
-            # *** HATANIN ÇÖZÜMÜ BURADA ***
-            if paid_this_installment >= amount: # Taksit tam ödenmiş
+            if paid_this_installment >= amount:
                 if cumulative_amount <= total_cash: 
                     status, status_class, payment_method = "Ödendi", "bg-success", "nakit"
                 elif cumulative_amount <= total_cleared_payments: 
                     status, status_class, payment_method = "Ödendi", "bg-success", "çek"
                 else: 
                     status, status_class, payment_method = "Çek Verildi", "bg-warning text-dark", "çek"
-            elif paid_this_installment > 0: # Kısmen ödenmiş
+            elif paid_this_installment > 0:
                 status, status_class = "Kısmen Ödendi", "bg-info text-dark"
-                payment_method = None # Düzeltme: Yöntemi sıfırla
-            else: # Hiç ödenmemiş
+                payment_method = None
+            else:
                 status, status_class = ("Gecikmiş", "bg-danger") if due_date < today else ("Bekleniyor", "bg-secondary")
-                payment_method = None # Düzeltme: Yöntemi sıfırla
+                payment_method = None
                 
             expense_items.append({'date': due_date, 'description': title, 'party': sup_name or "Belirtilmemiş", 'details': 'Planlı Gider', 'amount': amount, 'status': status, 'status_class': status_class, 'payment_method': payment_method})
 
-        # Küçük Nakit Giderler
         cur.execute("SELECT expense_date, title, amount, description FROM petty_cash_expenses WHERE project_id = %s", (project_id,))
         for expense_date, title, amount, desc in cur.fetchall():
             expense_items.append({'date': expense_date, 'description': title, 'party': 'Kasa', 'details': desc or 'Küçük Gider', 'amount': amount, 'status': 'Ödendi', 'status_class': 'bg-success', 'payment_method': 'nakit'})
 
-        # Tarih filtresi
         if start_date_str:
             start_date_obj = datetime.strptime(start_date_str, '%Y-%m-%d').date()
             income_items = [i for i in income_items if i['date'] >= start_date_obj]
@@ -2225,11 +2237,9 @@ def project_overview(project_id):
             income_items = [i for i in income_items if i['date'] <= end_date_obj]
             expense_items = [e for e in expense_items if e['date'] <= end_date_obj]
 
-        # Parti listeleri (tarih filtresinden sonra)
         income_parties = sorted({i['party'] for i in income_items})
         expense_parties = sorted({e['party'] for e in expense_items})
 
-        # Ek filtreler - Gelir
         if income_party:
             lp = income_party.lower()
             income_items = [i for i in income_items if lp in i['party'].lower()]
@@ -2239,7 +2249,6 @@ def project_overview(project_id):
             ls = income_status.lower()
             income_items = [i for i in income_items if i['status'].lower().startswith(ls)]
 
-        # Ek filtreler - Gider
         if expense_party:
             le = expense_party.lower()
             expense_items = [e for e in expense_items if le in (e['party'] or '').lower()]
@@ -2249,11 +2258,23 @@ def project_overview(project_id):
             ls = expense_status.lower()
             expense_items = [e for e in expense_items if e['status'].lower().startswith(ls)]
 
-        # Sıralama
+        # --- YENİ EKLENEN KISIM: SUNUCU TABANLI KUSURSUZ SIRALAMA MANTIĞI ---
         is_reverse = (order == 'desc')
-        key_to_sort = 'party' if sort_by == 'party' else 'date'
-        income_items.sort(key=lambda x: x.get(key_to_sort, today if key_to_sort == 'date' else ''), reverse=is_reverse)
-        expense_items.sort(key=lambda x: x.get('date', today), reverse=is_reverse)
+        
+        def sort_logic(item, sort_col):
+            if sort_col == 'date':
+                return item.get('date') or today
+            elif sort_col == 'party':
+                return (item.get('party') or '').lower()
+            elif sort_col == 'amount':
+                return item.get('amount', Decimal(0))
+            elif sort_col == 'status':
+                return (item.get('status') or '').lower()
+            return item.get('date') or today
+
+        # Müşterileri gruplama özelliğini ezip, tamamen genel kurallara göre bağımsız sıralar
+        income_items.sort(key=lambda x: sort_logic(x, sort_by), reverse=is_reverse)
+        expense_items.sort(key=lambda x: sort_logic(x, sort_by), reverse=is_reverse)
 
     except Exception as e:
         flash(f"Proje genel bakışı oluşturulurken hata: {e}", "danger")
