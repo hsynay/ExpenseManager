@@ -371,7 +371,13 @@ def list_expenses():
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s", (project_id,))
         total_petty_cash = cur.fetchone()[0]
         total_project_expense = total_planned_expense + total_petty_cash
-        cur.execute("SELECT COALESCE(SUM(es.paid_amount), 0) FROM expense_schedule es JOIN expenses e ON es.expense_id = e.id WHERE e.project_id = %s", (project_id,))
+        cur.execute("""
+            SELECT COALESCE(SUM(sp.amount), 0) 
+            FROM supplier_payments sp 
+            JOIN expenses e ON sp.expense_id = e.id 
+            LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id 
+            WHERE e.project_id = %s AND (sp.payment_method = 'nakit' OR oc.status = 'odendi')
+        """, (project_id,))
         total_paid_scheduled = cur.fetchone()[0] or Decimal(0)
         total_paid_project = (total_paid_scheduled or Decimal(0)) + (total_petty_cash or Decimal(0))
         total_remaining_due = total_project_expense - total_paid_project
