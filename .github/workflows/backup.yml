@@ -1,0 +1,26 @@
+name: Daily Database Backup
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # her gün gece 02:00 UTC
+  workflow_dispatch:       # elle de çalıştırabilmek için
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Create backup
+        run: |
+          pg_dump "${{ secrets.SUPABASE_DB_URL }}" | gzip > backup-$(date +%F).sql.gz
+
+      - name: Upload backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_number }}
+          path: backup-*.sql.gz
+          retention-days: 30
