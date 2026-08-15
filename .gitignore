@@ -1,2 +1,5 @@
 .env
 venv/ 
+information_for_me/
+*.sql.gz
+backup-*.sql
