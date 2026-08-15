@@ -2,23 +2,68 @@ name: Daily Database Backup
 
 on:
   schedule:
-    - cron: '0 2 * * *'   # her gün gece 02:00 UTC
-  workflow_dispatch:       # elle de çalıştırabilmek için
+    - cron: '0 2 * * *'   # every day at 02:00 UTC
+  workflow_dispatch:       # allows manual runs from the Actions tab
 
 jobs:
   backup:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Install PostgreSQL client
+      # Ubuntu ships PostgreSQL client 16, but Supabase runs 17.x.
+      # pg_dump refuses to dump a newer server, so we install client 17
+      # from the official PostgreSQL apt repository.
+      - name: Install PostgreSQL 17 client
         run: |
           sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          sudo apt-get install -y curl ca-certificates
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          pg_dump --version
 
-      - name: Create backup
+      # PRIMARY BACKUP: only our own 15 tables (public schema).
+      # This is the one used for a real restore. If it fails, the whole
+      # workflow must fail, so we use "set -o pipefail" - without it,
+      # gzip would still succeed and create an empty file.
+      - name: Backup public schema (primary)
         run: |
-          pg_dump "${{ secrets.SUPABASE_DB_URL }}" | gzip > backup-$(date +%F).sql.gz
+          set -o pipefail
+          pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
+            --schema=public \
+            --no-owner \
+            --no-privileges \
+            | gzip > backup-public-$(date +%F).sql.gz
+          ls -lh backup-public-*.sql.gz
 
-      - name: Upload backup
+      # SECONDARY BACKUP: the whole database, including Supabase internal
+      # schemas (auth, storage, realtime...). Harder to restore because it
+      # needs admin rights, but useful as a complete reference copy.
+      # It is allowed to fail without breaking the primary backup.
+      - name: Backup full database (secondary)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
+            | gzip > backup-full-$(date +%F).sql.gz
+          ls -lh backup-full-*.sql.gz
+
+      # Fail loudly if the primary backup is suspiciously small.
+      # An empty or tiny file means the dump did not really work.
+      - name: Verify primary backup is not empty
+        run: |
+          SIZE=$(stat -c%s backup-public-$(date +%F).sql.gz)
+          echo "Primary backup size: $SIZE bytes"
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "ERROR: primary backup is too small, something went wrong."
+            exit 1
+          fi
+
+      - name: Upload backups
         uses: actions/upload-artifact@v4
         with:
           name: db-backup-${{ github.run_number }}
