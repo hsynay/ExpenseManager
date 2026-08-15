@@ -24,7 +24,17 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
+          # Installing is not enough: the runner already has client 16 in
+          # /usr/bin. Adding the v17 folder to GITHUB_PATH puts it first
+          # in PATH for every step that comes after this one.
+          echo "/usr/lib/postgresql/17/bin" >> $GITHUB_PATH
+
+      # Stop early with a clear message if the wrong client is still active.
+      - name: Verify pg_dump version
+        run: |
+          which pg_dump
           pg_dump --version
+          pg_dump --version | grep -q " 17\." || { echo "ERROR: wrong pg_dump version"; exit 1; }
 
       # PRIMARY BACKUP: only our own 15 tables (public schema).
       # This is the one used for a real restore. If it fails, the whole
