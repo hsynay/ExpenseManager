@@ -10,11 +10,35 @@ from datetime import datetime
 from itertools import groupby, zip_longest
 import json
 from datetime import date
-from decimal import Decimal 
+from decimal import Decimal
 from flask import jsonify
+from datetime import timedelta
+from dotenv import load_dotenv
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)  
+
+# Read the .env file before we use any environment variable below.
+load_dotenv()
+
+# The secret key signs the session cookie, so it must stay the same after a
+# restart and be shared by all gunicorn workers. A random key here would log
+# users out at random times.
+app.secret_key = os.environ.get('SECRET_KEY')
+if not app.secret_key:
+    raise RuntimeError(
+        "SECRET_KEY is not set. Add it to .env for local development, "
+        "or to the environment variables of the host in production."
+    )
+
+# Session cookie hardening.
+# SESSION_COOKIE_SECURE tells the browser to send the cookie over HTTPS only.
+# It must be true in production, but false for local http development.
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true',
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+)
 
 
 # Jinja filter: format numbers like Turkish style (e.g. 2600000 -> 2.600.000)
@@ -97,6 +121,10 @@ def login():
         if user and check_password_hash(user[2], password):
             session['user_id'] = user[0]
             session['user_name'] = user[3]
+            # Needed for PERMANENT_SESSION_LIFETIME to apply. Flask refreshes
+            # the cookie on each request, so the session ends 12 hours after
+            # the last activity.
+            session.permanent = True
             return redirect(url_for('dashboard'))
         else:
             flash('E-posta veya şifre hatalı.', 'danger')
