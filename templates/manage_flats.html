@@ -11,6 +11,7 @@
             </div>
             <div class="card-body p-4">
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div id="flats-container">
                         <div class="row mb-2 d-none d-md-flex fw-bold">
                             <div class="col-md-3"><label class="form-label">Blok Adı</label></div>

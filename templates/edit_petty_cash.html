@@ -9,6 +9,7 @@
             <div class="card-body p-4">
                 <h3 class="mb-4">Küçük Gideri Düzenle</h3>
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="next" value="{{ next_url }}">
                     <div class="mb-3">
                         <label class="form-label">Başlık</label>

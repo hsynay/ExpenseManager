@@ -12,6 +12,7 @@
             <div class="card-body">
                 <p class="card-text">Lütfen aylık durumunu görmek istediğiniz kooperatif projesini ve ilgili ayı seçin.</p>
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label for="project_id" class="form-label">Kooperatif Projesi</label>
                         <select name="project_id" id="project_id" class="form-select" required>
