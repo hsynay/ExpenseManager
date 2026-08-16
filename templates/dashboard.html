@@ -153,6 +153,7 @@
                             <!-- <a href="{{ url_for('list_expenses', project_id=project.id) }}" class="btn btn-primary btn-sm"><i class="fa-solid fa-file-invoice-dollar me-1"></i> Gider Düzenle</a> -->
                             <a href="{{ url_for('edit_project', project_id=project.id) }}" class="btn btn-warning btn-sm"><i class="fa-solid fa-pencil me-1"></i> Düzenle</a>
                             <form action="{{ url_for('delete_project', project_id=project.id) }}" method="POST" class="d-inline project-delete-form" data-project-name="{{ project.name }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-danger btn-sm"><i class="fa-solid fa-trash-alt me-1"></i> Sil</button>
                             </form>
                         </div>

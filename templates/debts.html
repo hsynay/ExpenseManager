@@ -302,6 +302,7 @@
                                                     <div class="d-inlene flex-wrap justify-content-center gap-2">
                                                         <a href="{{ url_for('edit_payment', payment_id=p_id, next=return_url) }}" class="btn btn-sm btn-outline-dark" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
                                                         <form action="{{ url_for('delete_payment', payment_id=p_id) }}" method="POST" class="d-inline" onsubmit="return confirm('Bu ödemeyi silerseniz, ilgili taksitlerin durumu yeniden hesaplanacaktır. Emin misiniz?');">
+                                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                             <input type="hidden" name="next" value="{{ return_url }}">
                                                             <button type="submit" class="btn btn-sm btn-outline-danger" title="Sil"><i class="fa-solid fa-trash"></i></button>
                                                         </form>
@@ -309,6 +310,7 @@
                                             {% if p_status == 'portfoyde' %}
                                             <div class="p-2 btn-group btn-group-sm" role="group">
                                                 <form action="{{ url_for('update_check_status') }}" method="POST" class="d-inline" style="margin-right: 2px;" onsubmit="return confirm('Çeki TAHSİL EDİLDİ işaretlemek istediğinize emin misiniz?');">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                     <input type="hidden" name="check_id" value="{{ p_check_id }}">
                                                     <input type="hidden" name="check_type" value="incoming">
                                                     <input type="hidden" name="new_status" value="tahsil_edildi">
@@ -316,6 +318,7 @@
                                                     <button type="submit" class="btn btn-success w-100">Çek tahsil edildi</button>
                                                 </form>
                                                 <form action="{{ url_for('update_check_status') }}" method="POST" class="d-inline" style="margin-left: 2px;" onsubmit="return confirm('Çeki KARŞILIKSIZ işaretlemek istediğinize emin misiniz?');">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                     <input type="hidden" name="check_id" value="{{ p_check_id }}">
                                                     <input type="hidden" name="check_type" value="incoming">
                                                     <input type="hidden" name="new_status" value="karsiliksiz">
@@ -405,6 +408,7 @@
                                                     <td class="text-center">
                                                     <a href="{{ url_for('edit_payment', payment_id=p_id, next=return_url) }}" class="btn btn-sm btn-outline-dark me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
                                                     <form action="{{ url_for('delete_payment', payment_id=p_id) }}" method="POST" class="d-inline">
+                                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                         <input type="hidden" name="next" value="{{ return_url }}">
                                                         <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu ödemeyi silerseniz, ilgili taksitlerin durumu yeniden hesaplanacaktır. Emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
                                                     </form>

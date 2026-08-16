@@ -19,6 +19,7 @@
         <div class="card">
             <div class="card-body p-4">
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label for="supplier_id" class="form-label fw-semibold">Tedarikçi / Taşeron (*)</label>
                         <select class="form-select" id="supplier_id" name="supplier_id" required>

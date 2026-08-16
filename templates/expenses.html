@@ -125,6 +125,7 @@
                         <td class="text-end">
                             <a href="{{ url_for('edit_petty_cash', item_id=item[0], project_id=project_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
                             <form action="{{ url_for('delete_petty_cash', item_id=item[0]) }}" method="POST" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="project_id" value="{{ project_id }}">
                                 <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu gideri silmek istediğinizden emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
                             </form>
@@ -159,6 +160,7 @@
                 {% set return_url = url_for('list_expenses') + ('?' + current_query if current_query else '') + '#exp-' + expense.expense_id|string %}
                 <a href="{{ url_for('manage_expense_plan', expense_id=expense.expense_id, next=return_url) }}" class="btn btn-outline-warning btn-sm" title="Planı Yönet"><i class="fa-solid fa-edit me-1"></i>Planı Yönet</a>
                 <form action="{{ url_for('delete_expense', expense_id=expense.expense_id) }}" method="POST" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="project_id" value="{{ project_id }}">
                     <button type="submit" class="btn btn-outline-danger btn-sm" title="Gideri Sil" onclick="return confirm('Bu gideri ve tüm taksitlerini silmek istediğinizden emin misiniz?')"><i class="fa-solid fa-trash-alt"></i></button>
                 </form>
@@ -243,6 +245,7 @@
                                 <div class="d-flex justify-content-center align-items-center gap-2 flex-wrap">
                                     <a href="{{ url_for('edit_supplier_payment', payment_id=p_id, next=return_url) }}" class="btn btn-sm btn-outline-primary" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
                                     <form action="{{ url_for('delete_supplier_payment', payment_id=p_id) }}" method="POST" class="d-inline" onsubmit="return confirm('Bu ödemeyi silmek istediğinizden emin misiniz? Bu işlem ilgili taksitlerin durumunu yeniden hesaplayacaktır.');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="project_id" value="{{ project_id }}">
                                         <input type="hidden" name="next" value="{{ return_url }}">
                                         <button type="submit" class="btn btn-sm btn-outline-danger" title="Sil"><i class="fa-solid fa-trash"></i></button>
@@ -252,6 +255,7 @@
                                             {% if p_status == 'verildi' %}
                                             <div class="btn-group btn-group-sm w-100" role="group">
                                                 <form action="{{ url_for('update_check_status') }}" method="POST" class="d-inline" onsubmit="return confirm('Çeki ÖDENDİ işaretlemek istediğinize emin misiniz?');">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                     <input type="hidden" name="check_id" value="{{ p_check_id }}">
                                                     <input type="hidden" name="check_type" value="outgoing">
                                                     <input type="hidden" name="new_status" value="odendi">
@@ -282,6 +286,7 @@
     <div class="modal fade" id="addPettyCashModal" tabindex="-1">
         <div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Yeni Küçük Gider Ekle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <form action="{{ url_for('add_petty_cash', project_id=project_id) }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="modal-body">
                     <div class="mb-3"><label class="form-label">Başlık (*)</label><input type="text" name="petty_cash_title" class="form-control" required></div>
                     <div class="mb-3"><label class="form-label">Tutar (₺) (*)</label><input type="text" name="petty_cash_amount" class="form-control thousands-input" required></div>

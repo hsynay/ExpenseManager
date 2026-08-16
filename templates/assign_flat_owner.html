@@ -21,6 +21,7 @@
                 {% endwith %}
 
                 <form method="POST" id="assignFlatForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label for="projectSelect" class="form-label">Proje Seçin</label>
                         <select class="form-select" id="projectSelect" name="project_id" required>
@@ -182,9 +183,15 @@
 
     confirmDeleteBtn.addEventListener('click', function() {
         if (flatIdToDelete) {
+            // The CSRF token comes from the <meta> tag in base.html, because a
+            // JSON request cannot carry a hidden form field.
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
             fetch('/delete_flat_owner_data', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
                 body: JSON.stringify({ flat_id: flatIdToDelete }),
             }).then(response => {
                 if(response.ok) {

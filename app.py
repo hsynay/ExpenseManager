@@ -14,6 +14,7 @@ from decimal import Decimal
 from flask import jsonify
 from datetime import timedelta
 from dotenv import load_dotenv
+from flask_wtf.csrf import CSRFProtect, CSRFError
 
 app = Flask(__name__)
 
@@ -39,6 +40,30 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true',
     PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
 )
+
+# CSRF protection for every POST request. Templates must send the token in a
+# hidden "csrf_token" field, or in the "X-CSRFToken" header for fetch() calls.
+csrf = CSRFProtect(app)
+
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    """Show a clear message instead of a raw 400 page.
+
+    This usually happens when the session expired and the page was left open
+    for a long time.
+    """
+    app.logger.warning('CSRF validation failed: %s', e.description)
+    # fetch() calls expect JSON, not a redirect.
+    if request.is_json or request.accept_mimetypes.best == 'application/json':
+        return jsonify({'error': 'csrf_failed'}), 400
+    flash('Güvenlik doğrulaması başarısız oldu. Oturumunuz zaman aşımına '
+          'uğramış olabilir, lütfen sayfayı yenileyip tekrar deneyin.', 'danger')
+    # Do not redirect to request.referrer: that header is attacker controlled
+    # and would create an open redirect.
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
 
 
 # Jinja filter: format numbers like Turkish style (e.g. 2600000 -> 2.600.000)

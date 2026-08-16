@@ -25,6 +25,7 @@
             </div>
             <div class="card-body p-4">
                 <form method="POST" action="{{ url_for('manage_payment_plan', flat_id=flat_id, next=request.args.get('next')) }}" id="payment-plan-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="plan_json" id="plan_json" />
                     <input type="hidden" name="next" value="{{ next_url }}">
                     <div id="installments-container">
