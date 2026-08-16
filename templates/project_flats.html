@@ -34,6 +34,7 @@
 
 <div class="card p-4">
     <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div id="flat-entries">
             <!-- Başlık Satırı -->
             <div class="row mb-2 d-none d-md-flex">

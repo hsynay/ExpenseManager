@@ -11,6 +11,7 @@
             </div>
             <div class="card-body p-4">
                 <form method="POST" action="{{ url_for('add_expense', project_id=project_id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="plan_json" id="plan_json">
                     <div class="mb-3">
                         <label for="title" class="form-label fw-semibold">Gider Başlığı (*)</label>

@@ -19,6 +19,7 @@
                 </div>
 
                 <form method="POST" action="{{ url_for('pay_expense_installment', installment_id=installment[0], next=request.args.get('next')) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="next" value="{{ next_url }}">
                     <div class="mb-3">
                         <label for="amount" class="form-label fw-semibold">Ödenecek Tutar (*)</label>
