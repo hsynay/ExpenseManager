@@ -63,7 +63,8 @@
                     </thead>
                     <tbody>
                         {% for p in report_data.income_details %}
-                        <tr>
+                        {# Rows that are not real money yet are shown faded #}
+                        <tr{% if not p.counts %} class="text-muted fst-italic"{% endif %}>
                             <td>{{ p.date.strftime('%d.%m.%Y') }}</td>
                             <td>{{ p.customer }}</td>
                             <td class="small text-muted">{{ p.flat }}</td>
@@ -84,6 +85,17 @@
                         <tr><td colspan="7" class="text-center text-muted p-3">Bu ay gelir kaydı yok.</td></tr> {# Colspan 7 oldu #}
                         {% endfor %}
                     </tbody>
+                    {# Karşılıksız çekler hiçbir toplama girmez #}
+                    <tfoot class="table-light">
+                        <tr class="fw-bold">
+                            <td colspan="6" class="text-end">Tahsil edilen (ay geliri)</td>
+                            <td class="text-end text-success">+ {{ report_data.income_collected|thousands }} ₺</td>
+                        </tr>
+                        <tr class="text-muted">
+                            <td colspan="6" class="text-end">Henüz tahsil edilmemiş (portföydeki çek)</td>
+                            <td class="text-end">{{ report_data.income_pending|thousands }} ₺</td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
@@ -108,7 +120,8 @@
                     </thead>
                     <tbody>
                         {% for e in report_data.expense_details %}
-                        <tr>
+                        {# Rows that are not real money yet are shown faded #}
+                        <tr{% if not e.counts %} class="text-muted fst-italic"{% endif %}>
                             <td>{{ e.date.strftime('%d.%m.%Y') }}</td>
                             <td><span class="badge bg-secondary">{{ e.type }}</span></td>
                             <td>
@@ -136,6 +149,17 @@
                         <tr><td colspan="7" class="text-center text-muted p-3">Bu ay gider kaydı yok.</td></tr> {# Colspan 7 oldu #}
                         {% endfor %}
                     </tbody>
+                    {# Karşılıksız çekler hiçbir toplama girmez #}
+                    <tfoot class="table-light">
+                        <tr class="fw-bold">
+                            <td colspan="6" class="text-end">Ödenen (ay gideri)</td>
+                            <td class="text-end text-danger">- {{ report_data.expense_paid|thousands }} ₺</td>
+                        </tr>
+                        <tr class="text-muted">
+                            <td colspan="6" class="text-end">Henüz ödenmemiş (portföydeki çek)</td>
+                            <td class="text-end">{{ report_data.expense_pending|thousands }} ₺</td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
