@@ -382,7 +382,8 @@
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {% for p_id, p_flat_id, p_date, p_desc, p_amount, p_method, p_status, p_bank, p_no, p_due in flat.payments %}
+                                                {# Bu satırdaki isim sayısı app.py'deki pay_hist_sql sorgusunun kolon sayısıyla aynı olmalı #}
+                                                {% for p_id, p_flat_id, p_date, p_desc, p_amount, p_method, p_status, p_bank, p_no, p_due, p_check_id in flat.payments %}
                                                 <tr class="{% if p_method == 'nakit' %}table-primary{% elif p_status == 'tahsil_edildi' %}table-success{% elif p_status == 'karsiliksiz' %}table-danger{% else %}table-warning{% endif %}">
                                                     <td>{{ p_date.strftime('%d.%m.%Y') }}</td>
                                                     <td>
