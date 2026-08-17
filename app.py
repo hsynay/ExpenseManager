@@ -86,13 +86,32 @@ def handle_csrf_error(e):
 
 @app.errorhandler(429)
 def handle_rate_limit(e):
-    """Too many failed login attempts from the same address."""
+    """Too many failed login attempts from the same address.
+
+    WARNING: login.html is hardcoded here. This is correct only while /login
+    is the single route with a rate limit. If you add a limit to any other
+    route, this handler must choose the page by request.endpoint, otherwise
+    the user gets the login page after, say, a blocked report request.
+    """
     app.logger.warning('Rate limit reached on %s from %s',
                        request.path, get_remote_address())
     flash('Çok fazla başarısız giriş denemesi yapıldı. Güvenlik nedeniyle '
           'bir süre beklemeniz gerekiyor. Lütfen 1 dakika sonra tekrar '
           'deneyin.', 'danger')
     return render_template('login.html'), 429
+
+
+class ValidationError(ValueError):
+    """An input problem with a message that is safe to show to the user.
+
+    We raise this from our own checks, so the text is written for people and
+    contains no technical detail. Every other exception may carry database or
+    code internals, so it goes to the log and the user gets a short message
+    that only says which operation failed.
+
+    It extends ValueError to keep the old behaviour of any code that already
+    catches ValueError.
+    """
 
 
 # Jinja filter: format numbers like Turkish style (e.g. 2600000 -> 2.600.000)
@@ -289,9 +308,11 @@ def manage_flats(project_id):
             flash('Daire listesi başarıyla güncellendi.', 'success')
             return redirect(url_for('assign_flat_owner'))
 
-        except Exception as e:
+        except Exception:
             conn.rollback()
-            flash(f'Daireler güncellenirken bir hata oluştu: {e}', 'danger')
+            app.logger.exception('Failed to update flats of project %s', project_id)
+            flash('Daireler güncellenirken bir hata oluştu. Değişiklikler '
+                  'kaydedilmedi.', 'danger')
         finally:
             cur.close()
             conn.close()
@@ -306,8 +327,10 @@ def manage_flats(project_id):
         cur.execute("SELECT id, block_name, flat_no, floor, room_type, owner_id FROM flats WHERE project_id = %s ORDER BY block_name, floor, flat_no", (project_id,))
         existing_flats = cur.fetchall()
         
-    except Exception as e:
-        flash(f'Veri alınırken bir hata oluştu: {e}', 'danger')
+    except Exception:
+        app.logger.exception('Failed to load flats page of project %s', project_id)
+        flash('Daire bilgileri alınırken bir hata oluştu. Liste eksik olabilir.',
+              'danger')
         project_name = "Bilinmeyen Proje"
         existing_flats = []
     finally:
@@ -497,8 +520,11 @@ def list_expenses():
             expense_dict['installments'].sort(key=lambda x: x['due_date'])
             expenses_data.append(expense_dict)
             
-    except Exception as e:
-        flash(f"Giderler listelenirken bir hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to list expenses (project_id=%s)',
+                             project_id_str)
+        flash("Giderler listelenirken bir hata oluştu. Liste eksik olabilir.",
+              "danger")
     finally:
         cur.close()
         conn.close()
@@ -580,7 +606,7 @@ def edit_supplier_payment(payment_id):
             cur.execute("SELECT expense_id, check_id FROM supplier_payments WHERE id = %s", (payment_id,))
             result = cur.fetchone()
             if not result:
-                raise ValueError("Güncellenecek ödeme kaydı bulunamadı.")
+                raise ValidationError("Güncellenecek ödeme kaydı bulunamadı.")
             expense_id, check_id = result
 
             cur.execute("UPDATE supplier_payments SET amount=%s, payment_date=%s, description=%s WHERE id=%s",
@@ -600,9 +626,14 @@ def edit_supplier_payment(payment_id):
             project_id = cur.fetchone()[0]
             return redirect(url_for('list_expenses', project_id=project_id))
 
-        except Exception as e:
+        except ValidationError as e:
             conn.rollback()
-            flash(f'Güncelleme sırasında hata: {e}', 'danger')
+            flash(str(e), 'danger')
+        except Exception:
+            conn.rollback()
+            app.logger.exception('Failed to update supplier payment %s', payment_id)
+            flash('Tedarikçi ödemesi güncellenirken bir hata oluştu. '
+                  'Değişiklikler kaydedilmedi.', 'danger')
         finally:
             cur.close()
             conn.close()
@@ -639,8 +670,9 @@ def edit_supplier_payment(payment_id):
             'check_due_date': payment_raw[7]
         }
 
-    except Exception as e:
-        flash(f'Ödeme bilgileri alınırken hata oluştu: {e}', 'danger')
+    except Exception:
+        app.logger.exception('Failed to load supplier payment %s', payment_id)
+        flash('Tedarikçi ödemesi bilgileri alınırken bir hata oluştu.', 'danger')
         return redirect(url_for('dashboard'))
     finally:
         cur.close()
@@ -664,9 +696,11 @@ def delete_supplier_payment(payment_id):
                   {'expense_id': expense_id})
         conn.commit()
         flash('Gider ödemesi silindi ve ilgili taksitler güncellendi.', 'success')
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f'Ödeme silinirken hata oluştu: {e}', 'danger')
+        app.logger.exception('Failed to delete supplier payment %s', payment_id)
+        flash('Tedarikçi ödemesi silinirken bir hata oluştu. Ödeme silinmedi.',
+              'danger')
     finally:
         cur.close()
         conn.close()
@@ -693,7 +727,7 @@ def new_supplier_payment():
             description = request.form.get('description', 'Tedarikçi Ödemesi')
 
             if not all([supplier_id, payment_amount, payment_date_str, project_id]):
-                raise ValueError("Tüm zorunlu alanlar doldurulmalıdır.")
+                raise ValidationError("Tüm zorunlu alanlar doldurulmalıdır.")
 
             payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d').date()
 
@@ -743,9 +777,15 @@ def new_supplier_payment():
             flash(f'{format_thousands(payment_amount)} ₺ tutarındaki tedarikçi ödemesi kaydedildi ve borçlara yansıtıldı.', 'success')
             return redirect(url_for('list_expenses', project_id=project_id))
 
-        except Exception as e:
+        except ValidationError as e:
             if conn: conn.rollback()
-            flash(f'Gider ödemesi kaydedilirken bir hata oluştu: {e}', 'danger')
+            flash(str(e), 'danger')
+            return redirect(url_for('new_supplier_payment'))
+        except Exception:
+            if conn: conn.rollback()
+            app.logger.exception('Failed to save supplier payment')
+            flash('Tedarikçi ödemesi kaydedilirken bir hata oluştu. Ödeme '
+                  'kaydedilmedi.', 'danger')
             return redirect(url_for('new_supplier_payment'))
         finally:
             if conn:
@@ -870,7 +910,7 @@ def add_expense(project_id):
             supplier_id = None
             if supplier_option == 'new':
                 new_supplier_name = request.form.get('new_supplier_name')
-                if not new_supplier_name: raise ValueError("Yeni tedarikçi adı zorunludur.")
+                if not new_supplier_name: raise ValidationError("Yeni tedarikçi adı zorunludur.")
                 cur.execute(
                     "INSERT INTO suppliers (name, project_id, category) VALUES (%s, %s, %s) RETURNING id",
                     (new_supplier_name, project_id, request.form.get('new_supplier_category'))
@@ -878,7 +918,7 @@ def add_expense(project_id):
                 supplier_id = cur.fetchone()[0]
             else:
                 supplier_id_val = request.form.get('supplier_id')
-                if not supplier_id_val: raise ValueError("Lütfen bir tedarikçi seçin.")
+                if not supplier_id_val: raise ValidationError("Lütfen bir tedarikçi seçin.")
                 supplier_id = int(supplier_id_val)
 
             # --- DÜZELTİLEN KISIM: JSON İLE TAKSİTLERİ ALMA ---
@@ -909,7 +949,7 @@ def add_expense(project_id):
                         valid_installments.append((due_date, amt))
 
             if not valid_installments:
-                raise ValueError("En az bir taksit/ödeme girişi yapılmalıdır.")
+                raise ValidationError("En az bir taksit/ödeme girişi yapılmalıdır.")
 
             # *** KRİTİK: Taksitleri veri tabanına yazmadan önce KESİNLİKLE kronolojik sıraya sok ***
             valid_installments.sort(key=lambda x: x[0])
@@ -932,9 +972,14 @@ def add_expense(project_id):
             flash('Yeni gider ve ödeme planı başarıyla tanımlandı.', 'success')
             return redirect(url_for('list_expenses', project_id=project_id))
 
-        except Exception as e:
+        except ValidationError as e:
             conn.rollback()
-            flash(f'Gider eklenirken bir hata oluştu: {e}', 'danger')
+            flash(str(e), 'danger')
+        except Exception:
+            conn.rollback()
+            app.logger.exception('Failed to add expense to project %s', project_id)
+            flash('Gider eklenirken bir hata oluştu. Gider kaydedilmedi.',
+                  'danger')
         finally:
             cur.close()
             conn.close()
@@ -976,7 +1021,7 @@ def pay_expense_installment(installment_id):
             
             cur.execute("SELECT expense_id, amount, paid_amount FROM expense_schedule WHERE id = %s", (installment_id,))
             inst = cur.fetchone()
-            if not inst: raise ValueError("Ödeme yapılacak taksit bulunamadı.")
+            if not inst: raise ValidationError("Ödeme yapılacak taksit bulunamadı.")
             expense_id, total_due, already_paid = inst
 
             remaining_due = total_due - (already_paid or 0)
@@ -990,7 +1035,7 @@ def pay_expense_installment(installment_id):
             
             if payment_method == 'çek':
                 due_date_str = request.form.get('check_due_date')
-                if not due_date_str: raise ValueError("Çek için vade tarihi zorunludur.")
+                if not due_date_str: raise ValidationError("Çek için vade tarihi zorunludur.")
                 due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()
                 
                 # 1. Çeki kaydet
@@ -1021,9 +1066,15 @@ def pay_expense_installment(installment_id):
             conn.commit()
             return redirect(next_url or url_for('list_expenses', project_id=project_id))
 
-        except Exception as e:
+        except ValidationError as e:
             if conn: conn.rollback()
-            flash(f"Ödeme kaydedilirken bir hata oluştu: {e}", "danger")
+            flash(str(e), "danger")
+        except Exception:
+            if conn: conn.rollback()
+            app.logger.exception('Failed to pay expense installment %s',
+                                 installment_id)
+            flash("Taksit ödemesi kaydedilirken bir hata oluştu. Ödeme "
+                  "kaydedilmedi.", "danger")
         finally:
             cur.close()
             conn.close()
@@ -1110,9 +1161,16 @@ def assign_flat_owner():
             
             return redirect(url_for('assign_flat_owner'))
 
-        except Exception as e:
+        except ValidationError as e:
             conn.rollback()
-            flash(f'Bir hata oluştu: {e}', 'danger')
+            flash(str(e), 'danger')
+        except Exception:
+            conn.rollback()
+            # flat_id may not exist yet if int() failed, so read the raw form.
+            app.logger.exception('Failed to assign owner to flat %s',
+                                 request.form.get('flat_id'))
+            flash('Daire sahibi atanırken bir hata oluştu. Kayıt yapılmadı, '
+                  'lütfen bilgileri kontrol edip tekrar deneyin.', 'danger')
         finally:
             cur.close()
             conn.close()
@@ -1131,8 +1189,10 @@ def assign_flat_owner():
         flats_data = cur.fetchall()
         cur.execute("SELECT id, first_name, last_name FROM customers ORDER BY first_name, last_name")
         customers = cur.fetchall()
-    except Exception as e:
-        flash(f'Veri çekilirken bir hata oluştu: {e}', 'danger')
+    except Exception:
+        app.logger.exception('Failed to load the assign flat owner page')
+        flash('Sayfa verileri alınırken bir hata oluştu. Listeler eksik olabilir.',
+              'danger')
         projects, flats_data, customers = [], [], []
     finally:
         if not conn.closed:
@@ -1325,9 +1385,10 @@ def debt_status():
                 'total_project_remaining': total_project_remaining
             })
 
-    except Exception as e:
-        flash(f'Borç durumu sayfası yüklenirken bir hata oluştu: {e}', 'danger')
-        print(f"DEBTS PAGE ERROR: {e}")
+    except Exception:
+        app.logger.exception('Failed to build the debt status page')
+        flash('Borç durumu sayfası yüklenirken bir hata oluştu. Liste eksik '
+              'olabilir.', 'danger')
         projects_data = []
         all_projects = []
     finally:
@@ -1369,9 +1430,11 @@ def edit_project(project_id):
             flash('Proje başarıyla güncellendi. Şimdi daire bilgilerini gözden geçirebilirsiniz.', 'success')
             return redirect(url_for('manage_flats', project_id=project_id)) # YENİ YÖNLENDİRME
 
-        except Exception as e:
+        except Exception:
             conn.rollback()
-            flash(f'Proje güncellenirken bir hata oluştu: {e}', 'danger')
+            app.logger.exception('Failed to update project %s', project_id)
+            flash('Proje güncellenirken bir hata oluştu. Değişiklikler '
+                  'kaydedilmedi.', 'danger')
             return redirect(url_for('edit_project', project_id=project_id))
         finally:
             cur.close()
@@ -1442,9 +1505,11 @@ def delete_project(project_id):
 
         conn.commit()
         flash('Proje ve ilgili tüm veriler (çekler dahil) başarıyla silindi.', 'success')
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f'Proje silinirken bir hata oluştu: {e}', 'danger')
+        app.logger.exception('Failed to delete project %s', project_id)
+        flash('Proje silinirken bir hata oluştu. Proje silinmedi, tüm '
+              'veriler korundu.', 'danger')
     finally:
         cur.close()
         conn.close()
@@ -1611,8 +1676,10 @@ def list_customers():
                 'flats': customer_flats
             })
 
-    except Exception as e:
-        flash(f"Müşteriler yüklenirken hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to list customers')
+        flash("Müşteriler yüklenirken bir hata oluştu. Liste eksik olabilir.",
+              "danger")
         customers_data = []
     finally:
         cur.close()
@@ -1735,8 +1802,10 @@ def list_checks():
         cur.execute(out_sql, tuple(out_params))
         outgoing_checks = cur.fetchall()
 
-    except Exception as e:
-        flash(f"Çekler listelenirken bir hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to list checks')
+        flash("Çekler listelenirken bir hata oluştu. Liste eksik olabilir.",
+              "danger")
     finally:
         cur.close()
         conn.close()
@@ -1821,9 +1890,12 @@ def update_check_status():
 
         conn.commit()
 
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f"Çek durumu güncellenirken bir hata oluştu: {e}", "danger")
+        app.logger.exception('Failed to update status of check %s',
+                             request.form.get('check_id'))
+        flash("Çek durumu güncellenirken bir hata oluştu. Çekin durumu "
+              "değişmedi.", "danger")
     finally:
         cur.close()
         conn.close()
@@ -1957,8 +2029,11 @@ def cooperative_report(project_id, year, month):
         month_name = turkish_months.get(start_date.month, "")
         report_data['report_period'] = f"{month_name} {start_date.year}"
 
-    except Exception as e:
-        flash(f"Rapor oluşturulurken bir hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to build cooperative report for project '
+                             '%s (%s-%s)', project_id, year, month)
+        flash("Rapor oluşturulurken bir hata oluştu. Rapor eksik olabilir.",
+              "danger")
     finally:
         cur.close()
         conn.close()
@@ -2110,8 +2185,11 @@ def project_transactions(project_id):
             ls = expense_status.lower()
             expense_data = [e for e in expense_data if e['status'].lower() == ls]
 
-    except Exception as e:
-        flash(f"İşlem listesi alınırken hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to list transactions of project %s',
+                             project_id)
+        flash("İşlem listesi alınırken bir hata oluştu. Liste eksik olabilir.",
+              "danger")
         income_data, expense_data = [], []
         project_name = "Bilinmiyor"
     finally:
@@ -2374,8 +2452,10 @@ def project_overview(project_id):
         income_items.sort(key=lambda x: sort_logic(x, sort_by), reverse=is_reverse)
         expense_items.sort(key=lambda x: sort_logic(x, sort_by), reverse=is_reverse)
 
-    except Exception as e:
-        flash(f"Proje genel bakışı oluşturulurken hata: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to build overview of project %s', project_id)
+        flash("Proje genel bakışı oluşturulurken bir hata oluştu. Sayfa eksik "
+              "olabilir.", "danger")
     finally:
         cur.close()
         conn.close()
@@ -2392,16 +2472,20 @@ def add_petty_cash(project_id):
     """Bir projeye yeni bir küçük gider ekler."""
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    
+
+    # Read this before the try block. The last line of this function needs it
+    # even when the amount below cannot be parsed, and reading it inside the
+    # try would leave it undefined on that path.
+    next_url = request.form.get('next')
+
     try:
         title = request.form.get('petty_cash_title')
         amount = Decimal(request.form.get('petty_cash_amount').replace('.', '').replace(',', '.'))
         expense_date = request.form.get('petty_cash_date')
         description = request.form.get('petty_cash_description')
-        next_url = request.form.get('next')
 
         if not all([title, amount, expense_date]):
-            raise ValueError("Başlık, Tutar ve Tarih alanları zorunludur.")
+            raise ValidationError("Başlık, Tutar ve Tarih alanları zorunludur.")
         
         conn = get_connection()
         cur = conn.cursor()
@@ -2412,8 +2496,13 @@ def add_petty_cash(project_id):
         conn.commit()
         flash("Küçük gider başarıyla eklendi.", "success")
 
-    except Exception as e:
-        flash(f"Küçük gider eklenirken bir hata oluştu: {e}", "danger")
+    except ValidationError as e:
+        flash(str(e), "danger")
+    except Exception:
+        app.logger.exception('Failed to add petty cash expense to project %s',
+                             project_id)
+        flash("Küçük gider eklenirken bir hata oluştu. Kayıt yapılmadı, "
+              "lütfen bilgileri kontrol edip tekrar deneyin.", "danger")
     finally:
         if 'conn' in locals() and conn:
             cur.close()
@@ -2434,9 +2523,11 @@ def delete_petty_cash(item_id):
         cur.execute("DELETE FROM petty_cash_expenses WHERE id = %s", (item_id,))
         conn.commit()
         flash('Küçük gider kaydı silindi.', 'success')
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f'Küçük gider silinirken hata oluştu: {e}', 'danger')
+        app.logger.exception('Failed to delete petty cash expense %s', item_id)
+        flash('Küçük gider silinirken bir hata oluştu. Kayıt silinmedi.',
+              'danger')
     finally:
         cur.close()
         conn.close()
@@ -2465,9 +2556,11 @@ def edit_petty_cash(item_id):
                         (title, amount, expense_date, description, item_id))
             conn.commit()
             flash('Küçük gider güncellendi.', 'success')
-        except Exception as e:
+        except Exception:
             conn.rollback()
-            flash(f'Güncelleme sırasında hata oluştu: {e}', 'danger')
+            app.logger.exception('Failed to update petty cash expense %s', item_id)
+            flash('Küçük gider güncellenirken bir hata oluştu. Değişiklikler '
+                  'kaydedilmedi.', 'danger')
         finally:
             cur.close()
             conn.close()
@@ -2521,7 +2614,7 @@ def manage_expense_plan(expense_id):
                 parsed_rows.append((due_date, amount))
 
             if not parsed_rows:
-                raise ValueError("En az bir taksit girilmelidir.")
+                raise ValidationError("En az bir taksit girilmelidir.")
 
             parsed_rows.sort(key=lambda x: x[0])
 
@@ -2554,9 +2647,15 @@ def manage_expense_plan(expense_id):
             cur.execute("SELECT project_id FROM expenses WHERE id = %s", (expense_id,))
             return redirect(next_url or url_for('list_expenses', project_id=cur.fetchone()[0]))
 
-        except Exception as e:
+        except ValidationError as e:
             conn.rollback()
-            flash(f'Gider planı güncellenirken hata: {e}', 'danger')
+            flash(str(e), 'danger')
+        except Exception:
+            conn.rollback()
+            app.logger.exception('Failed to update the plan of expense %s',
+                                 expense_id)
+            flash('Gider planı güncellenirken bir hata oluştu. Plan '
+                  'değiştirilmedi.', 'danger')
         finally:
             cur.close()
             conn.close()
@@ -2603,9 +2702,11 @@ def delete_expense(expense_id):
 
         conn.commit()
         flash('Gider ve varsa ilgili çeki başarıyla silindi.', 'success')
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f'Gider silinirken bir hata oluştu: {e}', 'danger')
+        app.logger.exception('Failed to delete expense %s', expense_id)
+        flash('Gider silinirken bir hata oluştu. Gider silinmedi, veriler '
+              'korundu.', 'danger')
     finally:
         cur.close()
         conn.close()
@@ -2704,8 +2805,10 @@ def audit_logs():
         cur.execute("SELECT DISTINCT entity_type FROM audit_logs ORDER BY entity_type")
         entities = [e[0] for e in cur.fetchall()]
 
-    except Exception as e:
-        flash(f"Loglar yüklenirken hata: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to load audit logs')
+        flash("İşlem kayıtları yüklenirken bir hata oluştu. Liste eksik "
+              "olabilir.", "danger")
         rows, actions, entities = [], [], []
     finally:
         cur.close()
@@ -2793,18 +2896,18 @@ def manage_payment_plan(flat_id):
                 try:
                     due_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                 except ValueError:
-                    raise ValueError(f"Geçersiz tarih: {date_str}")
+                    raise ValidationError(f"Geçersiz tarih: {date_str}")
 
                 cleaned = amount_str.replace(' ', '').replace('.', '').replace(',', '.')
                 try:
                     amount = Decimal(cleaned)
                 except Exception:
-                    raise ValueError(f"Geçersiz tutar: {amount_str}")
+                    raise ValidationError(f"Geçersiz tutar: {amount_str}")
 
                 parsed_rows.append((due_date, amount))
 
             if not parsed_rows:
-                raise ValueError("En az bir taksit girilmelidir.")
+                raise ValidationError("En az bir taksit girilmelidir.")
 
             # Tarihe göre sırala (ID'lere güvenmek yerine)
             parsed_rows.sort(key=lambda x: x[0])
@@ -2844,9 +2947,15 @@ def manage_payment_plan(flat_id):
             flash('Ödeme planı başarıyla güncellendi.', 'success')
             return redirect(next_url or url_for('debt_status'))
 
-        except Exception as e:
+        except ValidationError as e:
             conn.rollback()
-            flash(f'Plan güncellenirken hata oluştu: {e}', 'danger')
+            flash(str(e), 'danger')
+        except Exception:
+            conn.rollback()
+            app.logger.exception('Failed to update the payment plan of flat %s',
+                                 flat_id)
+            flash('Ödeme planı güncellenirken bir hata oluştu. Plan '
+                  'değiştirilmedi.', 'danger')
             return redirect(next_url or url_for('manage_payment_plan', flat_id=flat_id))
         finally:
             cur.close()
@@ -2969,8 +3078,10 @@ def print_debt_statement(flat_id):
 
         return render_template('print_statement.html', data=statement_data)
 
-    except Exception as e:
-        flash(f"Döküm oluşturulurken bir hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to build the debt statement of flat %s',
+                             flat_id)
+        flash("Döküm oluşturulurken bir hata oluştu.", "danger")
         return redirect(url_for('debt_status'))
     finally:
         cur.close()
@@ -3495,11 +3606,10 @@ def reports():
 
             project_summaries.append(summary)
 
-    except Exception as e:
-        import traceback
-        print("REPORTS ERROR:", e)
-        traceback.print_exc()
-        flash(f"Raporlar oluşturulurken hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to build the reports page')
+        flash("Raporlar oluşturulurken bir hata oluştu. Rapor eksik olabilir.",
+              "danger")
     finally:
         cur.close()
         conn.close()
@@ -3601,9 +3711,10 @@ def dashboard():
 
         monthly_cash_flow = {'income': monthly_income, 'expense': monthly_expense, 'net': monthly_income - monthly_expense}
 
-    except Exception as e:
-        flash(f"Dashboard yüklenirken bir hata oluştu: {e}", "danger")
-        print(f"DASHBOARD HATASI: {e}")
+    except Exception:
+        app.logger.exception('Failed to build the dashboard')
+        flash("Ana sayfa yüklenirken bir hata oluştu. Bazı rakamlar eksik "
+              "olabilir.", "danger")
         total_customers, total_flats = 0, 0
         projects, overdue_customer_payments, upcoming_customer_payments, overdue_expense_payments, upcoming_expense_payments, upcoming_incoming_checks, upcoming_outgoing_checks = [], [], [], [], [], [], []
         monthly_cash_flow = {'income': 0, 'expense': 0, 'net': 0}
@@ -3764,9 +3875,12 @@ def new_payment(installment_id):
 
             conn.commit()
             return redirect(next_url or url_for('debt_status'))
-        except Exception as e:
+        except Exception:
             conn.rollback()
-            flash(f'Ödeme kaydedilirken bir hata oluştu: {e}', 'danger')
+            app.logger.exception('Failed to save payment (installment_id=%s)',
+                                 installment_id)
+            flash('Ödeme kaydedilirken bir hata oluştu. Ödeme kaydedilmedi.',
+                  'danger')
             # Hata durumunda hangi sayfaya yönlendireceğimizi belirle
             redirect_kwargs = {}
             if installment_id:
@@ -3922,9 +4036,11 @@ def delete_payment(payment_id):
         
         conn.commit()
         flash('Ödeme kaydı silindi ve taksit durumu güncellendi.', 'success')
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f'Ödeme silinirken hata oluştu: {e}', 'danger')
+        app.logger.exception('Failed to delete payment %s', payment_id)
+        flash('Ödeme silinirken bir hata oluştu. Ödeme silinmedi, taksit '
+              'durumları değişmedi.', 'danger')
     finally:
         cur.close()
         conn.close()
