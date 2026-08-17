@@ -15,6 +15,9 @@ from flask import jsonify
 from datetime import timedelta
 from dotenv import load_dotenv
 from flask_wtf.csrf import CSRFProtect, CSRFError
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 
@@ -45,6 +48,21 @@ app.config.update(
 # hidden "csrf_token" field, or in the "X-CSRFToken" header for fetch() calls.
 csrf = CSRFProtect(app)
 
+# The host runs the app behind a proxy, so request.remote_addr is the address
+# of the proxy, not of the visitor. ProxyFix reads the real client address
+# from the rightmost value of X-Forwarded-For, which only the proxy can set.
+# Without this the rate limit below would count all visitors as one person.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
+# Rate limiting. There is no global limit on purpose: only /login is limited,
+# so normal work is never slowed down. Counters live in memory, which is fine
+# because the app is kept awake and we do not want to run Redis.
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    storage_uri='memory://',
+)
+
 
 @app.errorhandler(CSRFError)
 def handle_csrf_error(e):
@@ -64,6 +82,17 @@ def handle_csrf_error(e):
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
     return redirect(url_for('login'))
+
+
+@app.errorhandler(429)
+def handle_rate_limit(e):
+    """Too many failed login attempts from the same address."""
+    app.logger.warning('Rate limit reached on %s from %s',
+                       request.path, get_remote_address())
+    flash('Çok fazla başarısız giriş denemesi yapıldı. Güvenlik nedeniyle '
+          'bir süre beklemeniz gerekiyor. Lütfen 1 dakika sonra tekrar '
+          'deneyin.', 'danger')
+    return render_template('login.html'), 429
 
 
 # Jinja filter: format numbers like Turkish style (e.g. 2600000 -> 2.600.000)
@@ -138,6 +167,16 @@ def ping():
     return jsonify({"status": "ok"}), 200
 
 @app.route('/login', methods=['GET', 'POST'])
+# Slow down automated password guessing without blocking real people: two
+# users share one account from the same office, so the limit is generous.
+# Only POST is limited, and deduct_when counts the attempt only when the page
+# is rendered again (status 200 = wrong password). A successful login answers
+# with a redirect (302) and is never counted.
+@limiter.limit(
+    '10 per minute',
+    methods=['POST'],
+    deduct_when=lambda response: response.status_code == 200,
+)
 def login():
     if request.method == 'POST':
         email = request.form['email']
