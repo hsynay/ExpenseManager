@@ -1959,8 +1959,23 @@ def cooperative_report(project_id, year, month):
         end_date = (start_date + relativedelta(months=1)) - relativedelta(days=1)
 
         # Proje bilgilerini al
-        cur.execute("SELECT name, total_flats FROM projects WHERE id = %s", (project_id,))
+        cur.execute("SELECT name, total_flats, project_type FROM projects WHERE id = %s", (project_id,))
         project_info = cur.fetchone()
+
+        if not project_info:
+            flash("Rapor istenen proje bulunamadı.", "warning")
+            return redirect(url_for('select_project_for_coop_report'))
+
+        # This report reads every payment as a monthly due (aidat) and carries a
+        # balance from month to month. That only makes sense for a cooperative.
+        # For a normal project it would still produce numbers, and they would
+        # look right while meaning nothing, so we stop here instead. The select
+        # page lists cooperative projects only, but a bookmarked or hand typed
+        # URL can still reach this route.
+        if project_info[2] != 'cooperative':
+            flash("Bu rapor sadece kooperatif projeler içindir.", "warning")
+            return redirect(url_for('select_project_for_coop_report'))
+
         report_data['project_name'] = project_info[0]
         
         # Üye sayısını (sahibi olan daire sayısı) al
@@ -1968,15 +1983,33 @@ def cooperative_report(project_id, year, month):
         member_count = cur.fetchone()[0]
         report_data['member_count'] = member_count
 
+        # Business rule for every total on this page:
+        # money counts only when it really moved. An incoming check counts
+        # when it is marked 'tahsil_edildi', an outgoing check when it is
+        # marked 'odendi'. A check that is still in the portfolio
+        # ('portfoyde' / 'verildi') closes nothing, and a bounced check
+        # ('karsiliksiz') never counts. The due date is information only:
+        # nothing happens automatically when it passes.
+
         # 1. Önceki Aydan Devreden Bakiyeyi Hesapla
         cur.execute("""
-            SELECT COALESCE(SUM(amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id
+            SELECT COALESCE(SUM(p.amount), 0)
+            FROM payments p
+            JOIN flats f ON p.flat_id = f.id
+            LEFT JOIN checks c ON p.check_id = c.id
             WHERE f.project_id = %s AND p.payment_date < %s
+              AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
         """, (project_id, start_date))
         total_income_before = cur.fetchone()[0]
-        
+
         # Önceki aydan devreden giderler her iki tablodan toplanıyor
-        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s AND expense_date < %s", (project_id, start_date))
+        cur.execute("""
+            SELECT COALESCE(SUM(e.amount), 0)
+            FROM expenses e
+            LEFT JOIN outgoing_checks oc ON e.outgoing_check_id = oc.id
+            WHERE e.project_id = %s AND e.expense_date < %s
+              AND (e.payment_method = 'nakit' OR oc.status = 'odendi')
+        """, (project_id, start_date))
         total_large_expense_before = cur.fetchone()[0]
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s AND expense_date < %s", (project_id, start_date))
         total_petty_cash_before = cur.fetchone()[0]
@@ -1985,16 +2018,27 @@ def cooperative_report(project_id, year, month):
         previous_balance = total_income_before - total_expense_before
         report_data['previous_balance'] = previous_balance
 
-        # 2. Bu Ayın Gelir ve Giderlerini Hesapla
+        # 2. Bu Ayın Gelir ve Giderlerini Hesapla (aynı kural: gerçekten hareket
+        # etmiş para)
         cur.execute("""
-            SELECT COALESCE(SUM(amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id
+            SELECT COALESCE(SUM(p.amount), 0)
+            FROM payments p
+            JOIN flats f ON p.flat_id = f.id
+            LEFT JOIN checks c ON p.check_id = c.id
             WHERE f.project_id = %s AND p.payment_date BETWEEN %s AND %s
+              AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
         """, (project_id, start_date, end_date))
         current_income = cur.fetchone()[0]
         report_data['current_income'] = current_income
-        
+
         # Rapor ayına ait giderler her iki tablodan toplanıyor
-        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
+        cur.execute("""
+            SELECT COALESCE(SUM(e.amount), 0)
+            FROM expenses e
+            LEFT JOIN outgoing_checks oc ON e.outgoing_check_id = oc.id
+            WHERE e.project_id = %s AND e.expense_date BETWEEN %s AND %s
+              AND (e.payment_method = 'nakit' OR oc.status = 'odendi')
+        """, (project_id, start_date, end_date))
         current_large_expense = cur.fetchone()[0]
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
         current_petty_cash_expense = cur.fetchone()[0]
@@ -2006,25 +2050,124 @@ def cooperative_report(project_id, year, month):
         report_data['end_of_month_balance'] = end_of_month_balance
 
         # 4. Detaylı listeler için verileri çek
+        #
+        # Every row is listed, but only money that really moved is added to the
+        # totals. Each row carries a "counts" flag:
+        #   counts = True   -> cash, or a check marked tahsil_edildi / odendi
+        #   counts = False  -> a check still in the portfolio, or a bounced one
+        # A bounced check is shown as well, but it is in no total at all,
+        # because that money will never arrive.
         cur.execute("""
-            SELECT p.payment_date, c.first_name || ' ' || c.last_name, p.description, p.amount 
-            FROM payments p 
-            JOIN flats f ON p.flat_id = f.id 
-            JOIN customers c ON f.owner_id = c.id
-            WHERE f.project_id = %s AND p.payment_date BETWEEN %s AND %s ORDER BY p.payment_date
+            SELECT p.payment_date, c.first_name, c.last_name,
+                   f.block_name, f.floor, f.flat_no,
+                   p.description, p.amount, p.payment_method, ch.status
+            FROM payments p
+            JOIN flats f ON p.flat_id = f.id
+            LEFT JOIN customers c ON f.owner_id = c.id
+            LEFT JOIN checks ch ON p.check_id = ch.id
+            WHERE f.project_id = %s AND p.payment_date BETWEEN %s AND %s
+            ORDER BY p.payment_date
         """, (project_id, start_date, end_date))
-        income_details = cur.fetchall()
+
+        income_details = []
+        income_collected = Decimal(0)
+        income_pending = Decimal(0)
+        for (pay_date, first_name, last_name, block, floor, flat_no,
+             description, amount, method, check_status) in cur.fetchall():
+            amount = amount or Decimal(0)
+
+            if method == 'çek' and check_status == 'karsiliksiz':
+                status_text, status_class, counts = 'Karşılıksız', 'danger', False
+            elif method == 'çek' and check_status != 'tahsil_edildi':
+                status_text, status_class, counts = 'Çek Portföyde', 'warning text-dark', False
+                income_pending += amount
+            else:
+                status_text, status_class, counts = 'Tahsil Edildi', 'success', True
+                income_collected += amount
+
+            income_details.append({
+                'date': pay_date,
+                # The flat may have no owner yet. The payment still belongs to
+                # the project total, so we list it instead of hiding it.
+                'customer': f"{first_name} {last_name}" if first_name else "Sahibi atanmamış",
+                'flat': f"Blok: {block or 'N/A'}, Kat: {floor}, No: {flat_no}",
+                'description': description,
+                'method': method,
+                'status_text': status_text,
+                'status_class': status_class,
+                'amount': amount,
+                'counts': counts,
+            })
+
         report_data['income_details'] = income_details
+        report_data['income_collected'] = income_collected
+        report_data['income_pending'] = income_pending
 
         # Gider detayları listesi her iki tablodan birleştirilip tarihe göre sıralanıyor
-        cur.execute("SELECT expense_date, title, description, amount FROM expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
-        large_expense_details = cur.fetchall()
-        cur.execute("SELECT expense_date, title, description, amount FROM petty_cash_expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
-        petty_cash_details = cur.fetchall()
-        
-        expense_details = large_expense_details + petty_cash_details
-        expense_details.sort(key=lambda x: x[0]) 
+        cur.execute("""
+            SELECT e.expense_date, e.title, s.name, e.description, e.amount,
+                   e.payment_method, oc.status
+            FROM expenses e
+            LEFT JOIN suppliers s ON e.supplier_id = s.id
+            LEFT JOIN outgoing_checks oc ON e.outgoing_check_id = oc.id
+            WHERE e.project_id = %s AND e.expense_date BETWEEN %s AND %s
+        """, (project_id, start_date, end_date))
+
+        expense_details = []
+        expense_paid = Decimal(0)
+        expense_pending = Decimal(0)
+        for (exp_date, title, supplier_name, description, amount, method,
+             check_status) in cur.fetchall():
+            amount = amount or Decimal(0)
+
+            if method == 'çek' and check_status == 'karsiliksiz':
+                status_text, status_class, counts = 'Karşılıksız', 'danger', False
+            elif method == 'çek' and check_status != 'odendi':
+                status_text, status_class, counts = 'Çek Verildi', 'warning text-dark', False
+                expense_pending += amount
+            else:
+                status_text, status_class, counts = 'Ödendi', 'success', True
+                expense_paid += amount
+
+            expense_details.append({
+                'date': exp_date,
+                'type': 'Büyük Gider',
+                'title': title,
+                'supplier': supplier_name or 'Belirtilmemiş',
+                'description': description,
+                'method': method,
+                'status_text': status_text,
+                'status_class': status_class,
+                'amount': amount,
+                'counts': counts,
+            })
+
+        # Petty cash is always money leaving the safe, so it always counts.
+        cur.execute("""
+            SELECT expense_date, title, description, amount
+            FROM petty_cash_expenses
+            WHERE project_id = %s AND expense_date BETWEEN %s AND %s
+        """, (project_id, start_date, end_date))
+        for exp_date, title, description, amount in cur.fetchall():
+            amount = amount or Decimal(0)
+            expense_paid += amount
+            expense_details.append({
+                'date': exp_date,
+                'type': 'Küçük Gider',
+                'title': title,
+                'supplier': 'Kasa',
+                'description': description,
+                'method': 'nakit',
+                'status_text': 'Ödendi',
+                'status_class': 'success',
+                'amount': amount,
+                'counts': True,
+            })
+
+        expense_details.sort(key=lambda x: x['date'])
         report_data['expense_details'] = expense_details
+        report_data['expense_paid'] = expense_paid
+        report_data['expense_pending'] = expense_pending
         
         month_name = turkish_months.get(start_date.month, "")
         report_data['report_period'] = f"{month_name} {start_date.year}"
