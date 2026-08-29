@@ -2581,14 +2581,21 @@ def project_overview(project_id):
             cur.execute(income_query, (project_id, project_id))
             for row in cur.fetchall():
                 due_date, amount, first, last, block, floor, flat_no, total_cash, total_cleared_check, total_portfolio_check, cumulative_amount = row
+                # An installment is closed only by money that really arrived:
+                # cash, and checks marked 'tahsil_edildi'. A check still in the
+                # portfolio closes nothing; it is shown but not counted. The
+                # totals at the top of the page already work this way.
                 total_cleared_payments = total_cash + total_cleared_check
-                total_valid_payments = total_cleared_payments + total_portfolio_check
-                paid_so_far = max(0, total_valid_payments - (cumulative_amount - amount))
+                total_with_portfolio = total_cleared_payments + total_portfolio_check
+                paid_so_far = max(0, total_cleared_payments - (cumulative_amount - amount))
                 paid_this_installment = min(amount, paid_so_far)
                 if paid_this_installment >= amount:
                     if cumulative_amount <= total_cash: status, status_class, payment_method = "Ödendi", "bg-success", "nakit"
-                    elif cumulative_amount <= total_cleared_payments: status, status_class, payment_method = "Ödendi", "bg-success", "çek"
-                    else: status, status_class, payment_method = "Çek Portföyde", "bg-warning text-dark", "çek"
+                    else: status, status_class, payment_method = "Ödendi", "bg-success", "çek"
+                elif total_with_portfolio >= cumulative_amount:
+                    # A check would cover this installment, but it has not been
+                    # cashed yet, so the debt is still open.
+                    status, status_class, payment_method = "Çek Portföyde", "bg-warning text-dark", "çek"
                 elif paid_this_installment > 0: 
                     status, status_class = "Kısmen Ödendi", "bg-info text-dark"
                     payment_method = None
@@ -2636,18 +2643,23 @@ def project_overview(project_id):
         for row in cur.fetchall():
             due_date, amount, title, sup_name, total_cash, total_cleared_check, total_portfolio_check, cumulative_amount = row
             
+            # Same rule as the income side: an expense installment is closed
+            # only by money that really left, that is cash and outgoing checks
+            # marked 'odendi'. A check that is only handed over ('verildi')
+            # closes nothing; it is shown but not counted.
             total_cleared_payments = total_cash + total_cleared_check
-            total_valid_payments = total_cleared_payments + total_portfolio_check
-            paid_so_far = max(0, total_valid_payments - (cumulative_amount - amount))
+            total_with_portfolio = total_cleared_payments + total_portfolio_check
+            paid_so_far = max(0, total_cleared_payments - (cumulative_amount - amount))
             paid_this_installment = min(amount, paid_so_far)
             
             if paid_this_installment >= amount:
                 if cumulative_amount <= total_cash: 
                     status, status_class, payment_method = "Ödendi", "bg-success", "nakit"
-                elif cumulative_amount <= total_cleared_payments: 
-                    status, status_class, payment_method = "Ödendi", "bg-success", "çek"
                 else: 
-                    status, status_class, payment_method = "Çek Verildi", "bg-warning text-dark", "çek"
+                    status, status_class, payment_method = "Ödendi", "bg-success", "çek"
+            elif total_with_portfolio >= cumulative_amount:
+                # A handed over check would cover this, but it is not paid yet.
+                status, status_class, payment_method = "Çek Verildi", "bg-warning text-dark", "çek"
             elif paid_this_installment > 0:
                 status, status_class = "Kısmen Ödendi", "bg-info text-dark"
                 payment_method = None
