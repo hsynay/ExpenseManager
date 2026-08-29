@@ -264,14 +264,38 @@
             /* Keep the button the same size so the page does not jump. */
             const width = btn.offsetWidth;
             const label = btn.innerHTML;
+            const hasText = btn.textContent.trim().length > 0;
 
             /* Disable one tick later: the browser has serialised the form by
              * then, so a disabled button can never drop a field. */
             setTimeout(function () {
                 btn.style.width = width + 'px';
+                /* Never let the label break into one letter per line. */
+                btn.style.whiteSpace = 'nowrap';
                 btn.disabled = true;
-                btn.innerHTML =
-                    '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Kaydediliyor...';
+
+                const spinner = document.createElement('span');
+                spinner.className = 'spinner-border spinner-border-sm';
+                spinner.setAttribute('role', 'status');
+                spinner.setAttribute('aria-hidden', 'true');
+
+                if (!hasText) {
+                    /* Icon only button: the icon would not fit next to the
+                     * spinner, and there is no wording that fits every button
+                     * (Sil, Kaydet, Ödeme Ekle...), so show the spinner alone. */
+                    btn.replaceChildren(spinner);
+                    return;
+                }
+
+                /* Keep the button's own wording: it already says what the
+                 * button does. The spinner only says that it is running. */
+                spinner.classList.add('me-1');
+                const icon = btn.querySelector('i');
+                if (icon && icon.parentElement === btn) {
+                    icon.replaceWith(spinner);
+                } else {
+                    btn.prepend(spinner);
+                }
             }, 0);
 
             /* If the page is restored from the back/forward cache the form is
@@ -282,6 +306,7 @@
                 btn.disabled = false;
                 btn.innerHTML = label;
                 btn.style.width = '';
+                btn.style.whiteSpace = '';
             });
         });
     })();
