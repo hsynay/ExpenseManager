@@ -41,6 +41,7 @@
             <div class="card-body p-4">
                 <form method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="submission_token" value="{{ submission_token() }}">
                     <input type="hidden" name="next" value="{{ request.args.get('next','') }}">
                     <div class="row mb-3">
                         <div class="col-md-6">

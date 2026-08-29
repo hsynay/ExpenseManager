@@ -22,6 +22,7 @@
 
                 <form method="POST" id="assignFlatForm">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="submission_token" value="{{ submission_token() }}">
                     <div class="mb-3">
                         <label for="projectSelect" class="form-label">Proje Seçin</label>
                         <select class="form-select" id="projectSelect" name="project_id" required>
