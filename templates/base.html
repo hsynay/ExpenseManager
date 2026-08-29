@@ -234,6 +234,57 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         });
     })();
+
+    /* Double submit guard, browser side.
+     *
+     * This only hides the problem from the user; the real protection is the
+     * one time submission_token checked by the server. One delegated listener
+     * covers every POST form, so no form needs its own code.
+     */
+    (function () {
+        document.addEventListener('submit', function (e) {
+            const form = e.target;
+            if (!form || form.tagName !== 'FORM') return;
+            if ((form.method || '').toLowerCase() !== 'post') return;
+
+            /* Some forms use onsubmit="return confirm(...)". When the user
+             * clicks Cancel the event is already cancelled, and locking the
+             * button here would leave it stuck forever. */
+            if (e.defaultPrevented) return;
+
+            if (form.dataset.submitting === '1') {
+                e.preventDefault();
+                return;
+            }
+            form.dataset.submitting = '1';
+
+            const btn = form.querySelector('button[type="submit"], input[type="submit"]');
+            if (!btn) return;
+
+            /* Keep the button the same size so the page does not jump. */
+            const width = btn.offsetWidth;
+            const label = btn.innerHTML;
+
+            /* Disable one tick later: the browser has serialised the form by
+             * then, so a disabled button can never drop a field. */
+            setTimeout(function () {
+                btn.style.width = width + 'px';
+                btn.disabled = true;
+                btn.innerHTML =
+                    '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Kaydediliyor...';
+            }, 0);
+
+            /* If the page is restored from the back/forward cache the form is
+             * still usable, so put the button back. */
+            window.addEventListener('pageshow', function (ev) {
+                if (!ev.persisted) return;
+                form.dataset.submitting = '';
+                btn.disabled = false;
+                btn.innerHTML = label;
+                btn.style.width = '';
+            });
+        });
+    })();
     </script>
 </body>
 </html>

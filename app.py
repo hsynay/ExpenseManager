@@ -18,6 +18,8 @@ from flask_wtf.csrf import CSRFProtect, CSRFError
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.middleware.proxy_fix import ProxyFix
+import uuid
+import random
 
 app = Flask(__name__)
 
@@ -172,6 +174,68 @@ def log_audit(cur, user_id, action, entity_type, entity_id=None, details=None):
     )
 
 
+# --- Double submit protection -------------------------------------------
+# A form that creates a new record carries a one time token. The token is
+# stored only after it is used, and always inside the same transaction as the
+# record itself, so the token survives exactly when the record does.
+
+# How long a used token is kept. It must be longer than the session lifetime
+# (12 hours): a form older than the session cannot be submitted anyway,
+# because its CSRF check fails first.
+SUBMISSION_TOKEN_RETENTION = '48 hours'
+
+# Chance of cleaning old tokens after a successful claim. Cleaning on every
+# request would be wasted work, and a cron job would be one more moving part.
+SUBMISSION_TOKEN_CLEANUP_CHANCE = 0.02
+
+
+def submission_token():
+    """Give a fresh token to a form. Called from templates."""
+    return str(uuid.uuid4())
+
+
+app.jinja_env.globals['submission_token'] = submission_token
+
+
+def claim_submission_token(cur, token, endpoint):
+    """Try to use a form token once. Return True the first time it is seen.
+
+    Runs on the caller's cursor on purpose: the token is written in the same
+    transaction as the record being created, so a failed save also releases
+    the token and the user can try again.
+
+    ON CONFLICT keeps the transaction usable when the token was already used.
+    It also makes two requests that arrive together safe: the second insert
+    waits for the first transaction to finish, then sees the conflict.
+    """
+    try:
+        token = str(uuid.UUID(str(token)))
+    except (ValueError, AttributeError, TypeError):
+        # A page from the cache, or a form we have not updated yet. Never
+        # block a real save because the token is missing or malformed.
+        app.logger.warning('Submission token missing or invalid on %s', endpoint)
+        return True
+
+    cur.execute(
+        """
+        INSERT INTO submission_tokens (token, endpoint) VALUES (%s, %s)
+        ON CONFLICT DO NOTHING
+        RETURNING token
+        """,
+        (token, endpoint)
+    )
+    if cur.fetchone() is None:
+        app.logger.info('Duplicate submission blocked on %s', endpoint)
+        return False
+
+    if random.random() < SUBMISSION_TOKEN_CLEANUP_CHANCE:
+        cur.execute(
+            "DELETE FROM submission_tokens WHERE used_at < now() - %s::interval",
+            (SUBMISSION_TOKEN_RETENTION,)
+        )
+    return True
+
+
 def get_user_by_email(email):
     conn = get_connection()
     cur = conn.cursor()
@@ -232,6 +296,16 @@ def new_project():
 
         conn = get_connection()
         cur = conn.cursor()
+
+        # Double submit guard, in the same transaction as the insert below.
+        # This route has no try/finally, so close the connection by hand here.
+        if not claim_submission_token(cur, request.form.get('submission_token'), 'new_project'):
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash('Bu işlem zaten kaydedilmişti.', 'info')
+            return redirect(url_for('dashboard'))
+
         cur.execute("""
             INSERT INTO projects (name, address, project_type, total_floors, total_flats)
             VALUES (%s, %s, %s, %s, %s)
@@ -265,6 +339,13 @@ def manage_flats(project_id):
 
     if request.method == 'POST':
         try:
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot create the flats twice.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'manage_flats'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(url_for('manage_flats', project_id=project_id))
+
             # Formdan gelen tüm daire verilerini listeler halinde al
             flat_ids = request.form.getlist('flat_id[]')
             block_names = request.form.getlist('block_name[]')
@@ -720,6 +801,14 @@ def new_supplier_payment():
 
     if request.method == 'POST':
         try:
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot record the payment twice.
+            # project_id is read from the form because it is not parsed yet.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'new_supplier_payment'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(url_for('list_expenses', project_id=request.form.get('project_id')))
+
             supplier_id = int(request.form.get('supplier_id'))
             payment_amount = Decimal(request.form.get('amount'))
             payment_date_str = request.form.get('payment_date')
@@ -902,6 +991,14 @@ def add_expense(project_id):
 
     if request.method == 'POST':
         try:
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot create the expense, its
+            # schedule and a new supplier twice.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'add_expense'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(url_for('list_expenses', project_id=project_id))
+
             title = request.form['title']
             description = request.form.get('description', '')
             
@@ -1012,6 +1109,15 @@ def pay_expense_installment(installment_id):
     if request.method == 'POST':
         try:
             next_url = request.form.get('next') or request.args.get('next')
+
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot record the payment and its
+            # outgoing check twice.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'pay_expense_installment'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(next_url or url_for('pay_expense_installment', installment_id=installment_id))
+
             payment_amount = Decimal(request.form.get('amount'))
             payment_date_str = request.form.get('payment_date')
             payment_method = request.form.get('payment_method', 'nakit')
@@ -1115,6 +1221,14 @@ def assign_flat_owner():
 
     if request.method == 'POST':
         try:
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot create the same customer
+            # twice when the "new customer" option is used.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'assign_flat_owner'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(url_for('assign_flat_owner'))
+
             project_id = int(request.form.get('project_id'))
             flat_id = int(request.form.get('flat_id'))
             customer_option = request.form.get('customer_option')
@@ -2632,6 +2746,13 @@ def add_petty_cash(project_id):
         
         conn = get_connection()
         cur = conn.cursor()
+
+        # Double submit guard, in the same transaction as the insert below.
+        if not claim_submission_token(cur, request.form.get('submission_token'), 'add_petty_cash'):
+            conn.rollback()
+            flash('Bu işlem zaten kaydedilmişti.', 'info')
+            return redirect(next_url or url_for('list_expenses', project_id=project_id))
+
         cur.execute(
             "INSERT INTO petty_cash_expenses (project_id, title, amount, expense_date, description) VALUES (%s, %s, %s, %s, %s)",
             (project_id, title, amount, expense_date, description)
@@ -3943,6 +4064,13 @@ def new_payment(installment_id):
     if request.method == 'POST':
         # ... (POST kısmı aynı kalıyor, DOKUNMAYIN) ...
         try:
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot create a second payment.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'new_payment'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(request.form.get('next') or request.args.get('next') or url_for('debt_status'))
+
             next_url = request.form.get('next') or request.args.get('next')
             flat_id = int(request.form.get('flat_id'))
             # Formdan gelen formatlı sayıyı temizleyerek Decimal'e çeviriyoruz
