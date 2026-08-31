@@ -458,6 +458,20 @@ def list_expenses():
                                selected_project_id=None,
                                user_name=session.get('user_name'))
 
+    # Validate the project id before any query. If it is broken we cannot
+    # render the detailed view, so we go back to the project picker.
+    try:
+        project_id = int(project_id_str)
+    except (TypeError, ValueError):
+        cur.close()
+        conn.close()
+        flash("Geçersiz proje seçimi.", "danger")
+        return render_template('expenses.html',
+                               detailed_view=False,
+                               all_projects=all_projects,
+                               selected_project_id=None,
+                               user_name=session.get('user_name'))
+
     expenses_data, petty_cash_items = [], []
     project_name = ""
     total_project_expense, total_paid_project, total_remaining_due = Decimal(0), Decimal(0), Decimal(0)
@@ -466,8 +480,6 @@ def list_expenses():
     large_titles, petty_titles = [], []
 
     try:
-        project_id = int(project_id_str)
-
         # --- KRİTİK HATA ÇÖZÜMÜ: 42026 gibi yanlış yılları otomatik düzeltip çöküşü önler ---
         try:
             cur.execute("""
