@@ -3305,8 +3305,16 @@ def print_debt_statement(flat_id):
         """, (flat_id,))
         installments_raw = cur.fetchall()
 
-        # 3. Daire için yapılan toplam ödemeyi çek
-        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE flat_id = %s", (flat_id,))
+        # 3. Daire için yapılan toplam ödemeyi çek. Only cash and cleared
+        # checks count. A check in the portfolio or a bounced one closes
+        # no debt, so it must stay out of this total.
+        cur.execute("""
+            SELECT COALESCE(SUM(p.amount), 0)
+            FROM payments p
+            LEFT JOIN checks c ON p.check_id = c.id
+            WHERE p.flat_id = %s
+              AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
+        """, (flat_id,))
         total_paid = cur.fetchone()[0]
 
         # 3.5. Ödeme kayıtlarını çek
@@ -4041,14 +4049,18 @@ def monthly_payments_api():
     # Son 12 ayın verisini çekmek için veritabanına özel bir sorgu gönder
     # Bu sorgu, her ayın başlangıcını ve o aydaki toplam ödemeyi hesaplar.
     # `DATE_TRUNC('month', ...)` fonksiyonu tarihi ayın ilk gününe yuvarlar
+    # Only cash and cleared checks are real money. A check in the portfolio
+    # or a bounced one must not appear as collected income on the chart.
     cur.execute("""
         SELECT 
-            DATE_TRUNC('month', payment_date)::DATE AS month, 
-            SUM(amount) AS total_amount
+            DATE_TRUNC('month', p.payment_date)::DATE AS month, 
+            SUM(p.amount) AS total_amount
         FROM 
-            payments
+            payments p
+            LEFT JOIN checks c ON p.check_id = c.id
         WHERE 
-            payment_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+            p.payment_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+            AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
         GROUP BY 
             month
         ORDER BY 
