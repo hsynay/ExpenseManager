@@ -3471,15 +3471,19 @@ def reports():
         d = min(base_date.day, monthrange(y, m)[1])
         return date(y, m, d)
 
+    # These go to the template, so they must exist even when a query fails.
+    # Otherwise render_template below raises UnboundLocalError and the user
+    # never sees the error message we prepared.
+    project_summaries = []
+    monthly_series = {}
+    check_series = {}
+    projection_series = {}
+    overdue_items = {}
+    month_boxes = {}
+
     try:
         cur.execute("SELECT id, name, project_type FROM projects ORDER BY name")
         projects = cur.fetchall()
-        project_summaries = []
-        monthly_series = {}
-        check_series = {}
-        projection_series = {}
-        overdue_items = {}
-        month_boxes = {}
 
         for project_id, project_name, project_type in projects:
             summary = {
