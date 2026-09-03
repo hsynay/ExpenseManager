@@ -1,18 +1,13 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify 
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from dateutil.relativedelta import relativedelta
 from calendar import monthrange
-from flask import Flask, render_template, request, redirect, url_for, session, flash
 from db import get_connection
 from werkzeug.security import generate_password_hash, check_password_hash
-from parser import parse_whatsapp_message
 import os
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from itertools import groupby, zip_longest
 import json
-from datetime import date
 from decimal import Decimal
-from flask import jsonify
-from datetime import timedelta
 from dotenv import load_dotenv
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from flask_limiter import Limiter
@@ -114,6 +109,39 @@ class ValidationError(ValueError):
     It extends ValueError to keep the old behaviour of any code that already
     catches ValueError.
     """
+
+
+# Dates typed in the browser can carry a five digit year, because the date
+# input has no upper bound of its own. Postgres stores such a year happily,
+# but psycopg2 cannot read it back into a Python date (the limit is 9999) and
+# every page that touches the row then fails. So every date coming from a form
+# must pass through here before it reaches SQL.
+MIN_FORM_YEAR = 2000
+MAX_FORM_YEAR = 2100
+
+
+def parse_form_date(value, label, required=True):
+    """Turn a form date string into a date, or raise ValidationError.
+
+    `label` names the field in the message the user sees.
+    Returns None when the field is empty and not required.
+    """
+    value = (value or "").strip()
+    if not value:
+        if required:
+            raise ValidationError("%s alanı zorunludur." % label)
+        return None
+    try:
+        parsed = datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError:
+        raise ValidationError(
+            "%s geçerli bir tarih değil. Lütfen gün/ay/yıl alanlarını "
+            "kontrol edin." % label)
+    if not (MIN_FORM_YEAR <= parsed.year <= MAX_FORM_YEAR):
+        raise ValidationError(
+            "%s için yıl %d ile %d arasında olmalı. Girilen yıl: %d."
+            % (label, MIN_FORM_YEAR, MAX_FORM_YEAR, parsed.year))
+    return parsed
 
 
 # Jinja filter: format numbers like Turkish style (e.g. 2600000 -> 2.600.000)
@@ -425,6 +453,34 @@ def manage_flats(project_id):
 
 
 
+def repair_out_of_range_dates(conn, cur, columns, page):
+    """Reset dates whose year is far in the future, and log it if it happens.
+
+    Postgres accepts a five digit year, but psycopg2 cannot read it back into
+    a Python date, so one such row makes every page that reads it fail. This
+    is a safety net, not the fix: forms now validate dates through
+    parse_form_date, so nothing should reach the database in this state.
+
+    When this net stays silent for a while, it can be removed. If a warning
+    shows up in the log, some input path is still missing validation and the
+    table name below says where to look.
+    """
+    try:
+        for table, column in columns:
+            cur.execute(
+                "UPDATE {t} SET {c} = CURRENT_DATE "
+                "WHERE EXTRACT(YEAR FROM {c}) > 3000".format(t=table, c=column))
+            if cur.rowcount:
+                app.logger.warning(
+                    'Out of range dates repaired on %s: %s rows in %s.%s '
+                    '(an input path is still missing date validation)',
+                    page, cur.rowcount, table, column)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        app.logger.exception('Date repair failed on %s', page)
+
+
 @app.route('/expenses', methods=['GET'])
 def list_expenses():
     if 'user_id' not in session:
@@ -480,17 +536,12 @@ def list_expenses():
     large_titles, petty_titles = [], []
 
     try:
-        # --- KRİTİK HATA ÇÖZÜMÜ: 42026 gibi yanlış yılları otomatik düzeltip çöküşü önler ---
-        try:
-            cur.execute("""
-                UPDATE petty_cash_expenses SET expense_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM expense_date) > 3000;
-                UPDATE expense_schedule SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
-                UPDATE expenses SET expense_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM expense_date) > 3000;
-            """)
-            conn.commit()
-        except Exception:
-            conn.rollback()
-        # ------------------------------------------------------------------------------------
+        # Safety net for out of range dates. See repair_out_of_range_dates.
+        repair_out_of_range_dates(conn, cur, [
+            ('petty_cash_expenses', 'expense_date'),
+            ('expense_schedule', 'due_date'),
+            ('expenses', 'expense_date'),
+        ], '/expenses')
 
         cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
         project_name = cur.fetchone()[0]
@@ -693,7 +744,8 @@ def edit_supplier_payment(payment_id):
         try:
             amount_str = request.form.get('amount').replace('.', '').replace(',', '.')
             amount = Decimal(amount_str)
-            payment_date = request.form.get('payment_date')
+            payment_date = parse_form_date(request.form.get('payment_date'),
+                                           "Ödeme tarihi")
             description = request.form.get('description')
             
             cur.execute("SELECT expense_id, check_id FROM supplier_payments WHERE id = %s", (payment_id,))
@@ -706,7 +758,8 @@ def edit_supplier_payment(payment_id):
                         (amount, payment_date, description, payment_id))
 
             if check_id:
-                check_due_date = request.form.get('check_due_date')
+                check_due_date = parse_form_date(
+                    request.form.get('check_due_date'), "Çek vade tarihi")
                 cur.execute("UPDATE outgoing_checks SET amount = %s, issue_date = %s, due_date = %s WHERE id = %s",
                             (amount, payment_date, check_due_date, check_id))
 
@@ -1439,6 +1492,13 @@ def debt_status():
         total_payments_by_flat = dict(cur.fetchall())
 
         # Adım 3.5: Ödeme geçmişini çek (Aynı kalıyor)
+        # Column order, read by index in the template. list_customers builds a
+        # similar list with the first two columns the other way round, so these
+        # two queries must never be copied between each other.
+        #   0 p.id            1 p.flat_id      2 p.payment_date  3 p.description
+        #   4 p.amount        5 p.payment_method
+        #   6 c.status        7 c.bank_name    8 c.check_number   9 c.due_date
+        #  10 p.check_id
         pay_hist_sql = """
             SELECT 
                 p.id, p.flat_id, p.payment_date, p.description, p.amount, p.payment_method,
@@ -1455,8 +1515,8 @@ def debt_status():
             pay_hist_params.append(project_filter)
         pay_hist_sql += " ORDER BY p.flat_id, p.payment_date DESC, p.id DESC"
         cur.execute(pay_hist_sql, tuple(pay_hist_params))
-        all_payments_raw = cur.fetchall()
-        payments_by_flat = {flat_id: list(group) for flat_id, group in groupby(all_payments_raw, key=lambda x: x[1])}
+        payment_rows_id_first = cur.fetchall()
+        payments_by_flat = {flat_id: list(group) for flat_id, group in groupby(payment_rows_id_first, key=lambda x: x[1])}
 
         # Adım 4: Verileri birleştir
         flats_list = []
@@ -1733,6 +1793,13 @@ def list_customers():
         total_paid_dict = dict(cur.fetchall())
 
         # 3.5. TÜM ÖDEME GEÇMİŞİNİ ÇEK (Yeni Eklendi)
+        # Column order, read by index in the template. debt_status builds a
+        # similar list with the first two columns the other way round and one
+        # extra column, so these two queries must never be copied between each
+        # other.
+        #   0 p.flat_id       1 p.id           2 p.payment_date  3 p.description
+        #   4 p.amount        5 p.payment_method
+        #   6 c.status        7 c.bank_name    8 c.check_number   9 c.due_date
         cur.execute("""
             SELECT 
                 p.flat_id, p.id, p.payment_date, p.description, p.amount, p.payment_method,
@@ -1741,9 +1808,8 @@ def list_customers():
             LEFT JOIN checks c ON p.check_id = c.id
             ORDER BY p.flat_id, p.payment_date DESC
         """)
-        from itertools import groupby
-        all_payments_raw = cur.fetchall()
-        payments_history_dict = {k: list(v) for k, v in groupby(all_payments_raw, key=lambda x: x[0])}
+        payment_rows_flat_first = cur.fetchall()
+        payments_history_dict = {k: list(v) for k, v in groupby(payment_rows_flat_first, key=lambda x: x[0])}
 
         # 4. Taksit Planlarını Çek
         cur.execute("""
@@ -2524,19 +2590,14 @@ def project_overview(project_id):
     expense_parties = []
 
     try:
-        # --- HATA ÇÖZÜMÜ: 42026 gibi yanlış yılları otomatik düzeltip çöküşü önler ---
-        try:
-            cur.execute("""
-                UPDATE payments SET payment_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM payment_date) > 3000;
-                UPDATE supplier_payments SET payment_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM payment_date) > 3000;
-                UPDATE outgoing_checks SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
-                UPDATE checks SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
-                UPDATE installment_schedule SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
-            """)
-            conn.commit()
-        except Exception:
-            conn.rollback()
-        # ------------------------------------------------------------------------------------
+        # Safety net for out of range dates. See repair_out_of_range_dates.
+        repair_out_of_range_dates(conn, cur, [
+            ('payments', 'payment_date'),
+            ('supplier_payments', 'payment_date'),
+            ('outgoing_checks', 'due_date'),
+            ('checks', 'due_date'),
+            ('installment_schedule', 'due_date'),
+        ], 'project_overview')
 
         cur.execute("SELECT name, project_type FROM projects WHERE id = %s", (project_id,))
         project_info = cur.fetchone()
@@ -2762,7 +2823,8 @@ def add_petty_cash(project_id):
     try:
         title = request.form.get('petty_cash_title')
         amount = Decimal(request.form.get('petty_cash_amount').replace('.', '').replace(',', '.'))
-        expense_date = request.form.get('petty_cash_date')
+        expense_date = parse_form_date(request.form.get('petty_cash_date'),
+                                       "Tarih")
         description = request.form.get('petty_cash_description')
 
         if not all([title, amount, expense_date]):
@@ -2835,15 +2897,19 @@ def edit_petty_cash(item_id):
         title = request.form.get('title')
         amount_raw = request.form.get('amount') or '0'
         amount = Decimal(amount_raw.replace('.', '').replace(',', '.'))
-        expense_date = request.form.get('expense_date')
         description = request.form.get('description')
         project_id = request.args.get('project_id') or request.form.get('project_id')
         next_url = request.form.get('next')
         try:
+            expense_date = parse_form_date(request.form.get('expense_date'),
+                                           "Tarih")
             cur.execute("UPDATE petty_cash_expenses SET title=%s, amount=%s, expense_date=%s, description=%s WHERE id=%s",
                         (title, amount, expense_date, description, item_id))
             conn.commit()
             flash('Küçük gider güncellendi.', 'success')
+        except ValidationError as e:
+            conn.rollback()
+            flash(str(e), 'danger')
         except Exception:
             conn.rollback()
             app.logger.exception('Failed to update petty cash expense %s', item_id)

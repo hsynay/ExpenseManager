@@ -21,7 +21,7 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Tarih</label>
-                        <input type="date" name="expense_date" class="form-control" value="{{ item.expense_date }}" required>
+                        <input type="date" min="2000-01-01" max="2100-12-31" name="expense_date" class="form-control" value="{{ item.expense_date }}" required>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Açıklama</label>

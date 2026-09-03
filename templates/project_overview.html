@@ -84,8 +84,8 @@
     <form class="row g-3" method="get">
         <input type="hidden" name="sort_by" value="{{ sort_by }}">
         <input type="hidden" name="order" value="{{ order }}">
-        <div class="col-md-3"><label class="form-label fw-semibold">Başlangıç Tarihi</label><input type="date" name="start_date" class="form-control" value="{{ start_date or '' }}"></div>
-        <div class="col-md-3"><label class="form-label fw-semibold">Bitiş Tarihi</label><input type="date" name="end_date" class="form-control" value="{{ end_date or '' }}"></div>
+        <div class="col-md-3"><label class="form-label fw-semibold">Başlangıç Tarihi</label><input type="date" min="2000-01-01" max="2100-12-31" name="start_date" class="form-control" value="{{ start_date or '' }}"></div>
+        <div class="col-md-3"><label class="form-label fw-semibold">Bitiş Tarihi</label><input type="date" min="2000-01-01" max="2100-12-31" name="end_date" class="form-control" value="{{ end_date or '' }}"></div>
         <div class="col-md-6"></div>
         <div class="col-md-3"><label class="form-label fw-semibold">Gelir - Kimden</label>
             <select name="income_party" class="form-select">

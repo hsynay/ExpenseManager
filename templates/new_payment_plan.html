@@ -165,7 +165,7 @@
                 newRow.innerHTML = `
                     <div class="col-md-5">
                         <label class="form-label-sm small fw-bold">Vade Tarihi</label>
-                        <input type="date" name="due_date[]" class="form-control" required>
+                        <input type="date" min="2000-01-01" max="2100-12-31" name="due_date[]" class="form-control" required>
                     </div>
                     <div class="col-md-5">
                         <label class="form-label-sm small fw-bold">Tutar (₺)</label>

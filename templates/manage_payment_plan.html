@@ -42,7 +42,7 @@
                                 <input type="hidden" name="installment_id[]" value="{{ installment[3] }}">
 
                                 <div class="col-md-5">
-                                    <input type="date" name="due_date[]" class="form-control" value="{{ installment[0].strftime('%Y-%m-%d') }}" {% if installment[2] %}readonly{% endif %} required>
+                                    <input type="date" min="2000-01-01" max="2100-12-31" name="due_date[]" class="form-control" value="{{ installment[0].strftime('%Y-%m-%d') }}" {% if installment[2] %}readonly{% endif %} required>
                                 </div>
                                 <div class="col-md-5">
                                     <input type="text" step="0.01" name="amount[]" class="form-control thousands-input" value="{{ installment[1]|thousands }}" {% if installment[2] %}readonly{% endif %} required>
@@ -128,7 +128,7 @@
             // GİZLİ INPUT (value="") BURAYA DA EKLENDİ
             newRow.innerHTML = `
                 <input type="hidden" name="installment_id[]" value="">
-                <div class="col-md-5"><input type="date" name="due_date[]" class="form-control" required></div>
+                <div class="col-md-5"><input type="date" min="2000-01-01" max="2100-12-31" name="due_date[]" class="form-control" required></div>
                 <div class="col-md-5"><input type="text" name="amount[]" class="form-control thousands-input" required></div>
                 <div class="col-md-2"><button type="button" class="btn btn-danger w-100 remove-row"><i class="fa-solid fa-trash-alt"></i></button></div>
             `;

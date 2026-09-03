@@ -50,11 +50,11 @@
         <form class="row g-3" method="get" action="{{ url_for('list_checks') }}">
             <div class="col-md-3">
                 <label class="form-label fw-semibold" style="color: green;">Alınan Çek - Vade Başlangıç</label>
-                <input type="date" name="in_due_from" class="form-control" value="{{ in_due_from or '' }}">
+                <input type="date" min="2000-01-01" max="2100-12-31" name="in_due_from" class="form-control" value="{{ in_due_from or '' }}">
             </div>
             <div class="col-md-3">
                 <label class="form-label fw-semibold"  style="color: green;">Alınan Çek - Vade Bitiş</label>
-                <input type="date" name="in_due_to" class="form-control" value="{{ in_due_to or '' }}">
+                <input type="date" min="2000-01-01" max="2100-12-31" name="in_due_to" class="form-control" value="{{ in_due_to or '' }}">
             </div>
             <div class="col-md-3">
                 <label class="form-label fw-semibold" style="color: green;">Veren Müşteri</label>
@@ -77,11 +77,11 @@
             <span></span>
             <div class="col-md-3">
                 <label class="form-label fw-semibold"  style="color: red;">Verilen Çek - Vade Başlangıç</label>
-                <input type="date" name="out_due_from" class="form-control" value="{{ out_due_from or '' }}">
+                <input type="date" min="2000-01-01" max="2100-12-31" name="out_due_from" class="form-control" value="{{ out_due_from or '' }}">
             </div>
             <div class="col-md-3">
                 <label class="form-label fw-semibold" style="color: red;">Verilen Çek - Vade Bitiş</label>
-                <input type="date" name="out_due_to" class="form-control" value="{{ out_due_to or '' }}">
+                <input type="date" min="2000-01-01" max="2100-12-31" name="out_due_to" class="form-control" value="{{ out_due_to or '' }}">
             </div>
             <div class="col-md-3">
                 <label class="form-label fw-semibold" style="color: red;">Verilen Kişi/Kurum</label>

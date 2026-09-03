@@ -87,7 +87,7 @@
                         </div>
                         <div class="col-md-6">
                             <label for="payment_date" class="form-label fw-semibold">İşlem Tarihi (*)</label>
-                            <input type="date" class="form-control" id="payment_date" name="payment_date" required>
+                            <input type="date" min="2000-01-01" max="2100-12-31" class="form-control" id="payment_date" name="payment_date" required>
                         </div>
                     </div>
 
@@ -110,7 +110,7 @@
                         <div class="row">
                             <div class="col-md-6 mb-3">
                                 <label for="check_due_date" class="form-label fw-semibold">Vade Tarihi (*)</label>
-                                <input type="date" class="form-control" id="check_due_date" name="check_due_date">
+                                <input type="date" min="2000-01-01" max="2100-12-31" class="form-control" id="check_due_date" name="check_due_date">
                             </div>
                              <div class="col-md-6 mb-3">
                                 <label for="check_bank_name" class="form-label fw-semibold">Banka Adı</label>
