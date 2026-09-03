@@ -110,7 +110,7 @@
             const newRow = document.createElement('div');
             newRow.classList.add('row', 'g-2', 'mb-2', 'align-items-center', 'installment-row');
             newRow.innerHTML = `
-                <div class="col-sm-6"><input type="date" name="installment_due_date[]" class="form-control" required></div>
+                <div class="col-sm-6"><input type="date" min="2000-01-01" max="2100-12-31" name="installment_due_date[]" class="form-control" required></div>
                 <div class="col-sm-5"><input type="text" name="installment_amount[]" class="form-control thousands-input" placeholder="Tutar" required></div>
                 <div class="col-sm-1"><button type="button" class="btn btn-sm btn-danger w-100 remove-row"><i class="fa-solid fa-trash-alt"></i></button></div>
             `;

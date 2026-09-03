@@ -24,7 +24,7 @@
                         </div>
                         <div class="col-md-6">
                             <label for="payment_date" class="form-label fw-semibold">İşlem Tarihi (*)</label>
-                            <input type="date" class="form-control" id="payment_date" name="payment_date" value="{{ payment.payment_date.strftime('%Y-%m-%d') }}" required>
+                            <input type="date" min="2000-01-01" max="2100-12-31" class="form-control" id="payment_date" name="payment_date" value="{{ payment.payment_date.strftime('%Y-%m-%d') }}" required>
                         </div>
                     </div>
 
@@ -32,7 +32,7 @@
                     {% if payment.is_check %}
                     <div class="mb-3">
                         <label for="check_due_date" class="form-label fw-semibold">Çek Vade Tarihi (*)</label>
-                        <input type="date" class="form-control" id="check_due_date" name="check_due_date" value="{{ payment.check_due_date.strftime('%Y-%m-%d') if payment.check_due_date else '' }}" required>
+                        <input type="date" min="2000-01-01" max="2100-12-31" class="form-control" id="check_due_date" name="check_due_date" value="{{ payment.check_due_date.strftime('%Y-%m-%d') if payment.check_due_date else '' }}" required>
                     </div>
                     {% endif %}
 

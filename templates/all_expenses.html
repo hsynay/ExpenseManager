@@ -30,11 +30,11 @@
         </div>
         <div class="col-md-3">
             <label class="form-label fw-semibold">Başlangıç Tarihi</label>
-            <input type="date" name="start_date" class="form-control" value="{{ start_date or '' }}">
+            <input type="date" min="2000-01-01" max="2100-12-31" name="start_date" class="form-control" value="{{ start_date or '' }}">
         </div>
         <div class="col-md-3">
             <label class="form-label fw-semibold">Bitiş Tarihi</label>
-            <input type="date" name="end_date" class="form-control" value="{{ end_date or '' }}">
+            <input type="date" min="2000-01-01" max="2100-12-31" name="end_date" class="form-control" value="{{ end_date or '' }}">
         </div>
         <div class="col-md-3 d-flex align-items-end">
             <button type="submit" class="btn btn-filter text-white me-2"><i class="fa-solid fa-search me-1"></i>Filtrele</button>

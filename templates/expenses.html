@@ -291,7 +291,7 @@
                 <div class="modal-body">
                     <div class="mb-3"><label class="form-label">Başlık (*)</label><input type="text" name="petty_cash_title" class="form-control" required></div>
                     <div class="mb-3"><label class="form-label">Tutar (₺) (*)</label><input type="text" name="petty_cash_amount" class="form-control thousands-input" required></div>
-                    <div class="mb-3"><label class="form-label">Tarih (*)</label><input type="date" name="petty_cash_date" class="form-control" required></div>
+                    <div class="mb-3"><label class="form-label">Tarih (*)</label><input type="date" min="2000-01-01" max="2100-12-31" name="petty_cash_date" class="form-control" required></div>
                     <div class="mb-3"><label class="form-label">Açıklama</label><textarea name="petty_cash_description" class="form-control" rows="2"></textarea></div>
                 </div>
                 <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Kaydet</button></div>
