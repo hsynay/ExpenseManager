@@ -1,0 +1,18 @@
+{# Previous / next links for one list.
+
+   Pass the dict build_pager() returns. The macro renders nothing when the
+   whole list fits on a single page. `label` names the list on pages that
+   show two of them. #}
+{% macro pager(p, label='') %}
+{% if p and (p.has_prev or p.has_next) %}
+<nav class="d-flex justify-content-between align-items-center my-3">
+    <a class="btn btn-sm btn-outline-secondary{% if not p.has_prev %} disabled{% endif %}"
+       href="{{ p.prev_url or '#' }}">&laquo; Önceki</a>
+    <span class="small text-muted">
+        {% if label %}{{ label }} &mdash; {% endif %}Sayfa {{ p.page }}
+    </span>
+    <a class="btn btn-sm btn-outline-secondary{% if not p.has_next %} disabled{% endif %}"
+       href="{{ p.next_url or '#' }}">Sonraki &raquo;</a>
+</nav>
+{% endif %}
+{% endmacro %}
