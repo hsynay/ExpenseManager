@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 
 {% block title %}Çek Takibi{% endblock %}
 
@@ -127,7 +128,7 @@
                     </thead>
                     <tbody>
                         {% for check in incoming_checks %}
-                        <tr class="{% if check[6] == 'karsiliksiz' %}table-danger{% elif check[1] < today and check[6] == 'portfoyde' %}table-warning{% endif %}">
+                        <tr id="chk-in-{{ check[0] }}" class="{% if check[6] == 'karsiliksiz' %}table-danger{% elif check[1] < today and check[6] == 'portfoyde' %}table-warning{% endif %}">
                             <td>{{ check[1].strftime('%d.%m.%Y') }}</td>
                             <td>{{ check[3] }}</td>
                             <td>{{ check[4] or '-' }} / {{ check[5] or '-' }}</td>
@@ -147,6 +148,7 @@
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="check_id" value="{{ check[0] }}">
                                         <input type="hidden" name="check_type" value="incoming">
+                                        <input type="hidden" name="next" value="{{ request.full_path }}#chk-in-{{ check[0] }}">
                                         <input type="hidden" name="new_status" value="tahsil_edildi">
                                         <button type="submit" class="btn btn-outline-success">Tahsil Edildi</button>
                                     </form>
@@ -154,6 +156,7 @@
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="check_id" value="{{ check[0] }}">
                                         <input type="hidden" name="check_type" value="incoming">
+                                        <input type="hidden" name="next" value="{{ request.full_path }}#chk-in-{{ check[0] }}">
                                         <input type="hidden" name="new_status" value="karsiliksiz">
                                         <button type="submit" class="btn btn-outline-danger">Karşılıksız</button>
                                     </form>
@@ -169,6 +172,7 @@
                     </tbody>
                 </table>
             </div>
+            {{ pager(incoming_pager, 'Alınan çekler') }}
         </div>
     </div>
 
@@ -191,7 +195,7 @@
                     </thead>
                     <tbody>
                         {% for check in outgoing_checks %}
-                        <tr class="{% if check[6] == 'odendi' %}table-success{% elif check[1] < today and check[6] == 'verildi' %}table-warning{% endif %}">
+                        <tr id="chk-out-{{ check[0] }}" class="{% if check[6] == 'odendi' %}table-success{% elif check[1] < today and check[6] == 'verildi' %}table-warning{% endif %}">
                             <td>{{ check[1].strftime('%d.%m.%Y') }}</td>
                             <td>{{ check[3] }}</td>
                             <td>{{ check[4] or '-' }} / {{ check[5] or '-' }}</td>
@@ -209,6 +213,7 @@
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="hidden" name="check_id" value="{{ check[0] }}">
                                     <input type="hidden" name="check_type" value="outgoing">
+                                    <input type="hidden" name="next" value="{{ request.full_path }}#chk-out-{{ check[0] }}">
                                     <input type="hidden" name="new_status" value="odendi">
                                     <button type="submit" class="btn btn-sm btn-outline-success">Ödendi İşaretle</button>
                                 </form>
@@ -223,6 +228,7 @@
                     </tbody>
                 </table>
             </div>
+            {{ pager(outgoing_pager, 'Verilen çekler') }}
         </div>
     </div>
 </div>
