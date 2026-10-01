@@ -122,62 +122,78 @@ def test_a_portfolio_check_is_not_spread_over_the_new_plan(client, factory):
     assert factory.paid_amounts(flat_id) == [D('0'), D('0')]
 
 
-# --- validation errors: A KNOWN BUG --------------------------------------
+# --- validation errors ---------------------------------------------------
 #
-# manage_payment_plan catches ValidationError, flashes the message, but does
-# not return. The finally block then closes the cursor, execution falls
-# through into the GET branch below it and reuses that closed cursor. The
-# user gets a 500 instead of the message that was prepared for them.
+# A refused plan sends the user back to the plan form with the message, and
+# the plan that was there before stays exactly as it was.
 #
-# app.py:3304-3320. The plan itself is safe, because the rollback happens
-# before the crash. manage_expense_plan does not have this problem: it ends
-# with a redirect after its finally block.
+# The user lands on the plan form on purpose and not on the 'next' address:
+# /debts does not render flash messages, so the message would be lost there.
+# 'next' is carried along, so the save that follows still returns to /debts.
 #
-# The tests below record today's behaviour. When the route is fixed they will
-# fail on the status code, which is exactly the signal wanted; the assertions
-# on the plan staying unchanged should keep passing.
+# This used to answer 500: the error branch did not return, the finally block
+# closed the cursor and the GET branch below reused it.
 
-def test_KNOWN_BUG_invalid_date_gives_500_but_keeps_the_plan(client, factory):
+def post_plan(client, flat_id, rows, next_url=None):
+    url = '/flat/%d/manage_plan' % flat_id
+    if next_url:
+        url += '?next=' + next_url
+    return client.post(url, data=plan_payload(rows), follow_redirects=True)
+
+
+def test_invalid_date_is_refused_with_a_message(client, factory):
     project_id = factory.project('plan hatali tarih')
     flat_id = factory.flat(project_id, total_price=D('0'))
     factory.installment(flat_id, JAN, D('777'))
     factory.commit()
 
-    response = client.post('/flat/%d/manage_plan' % flat_id,
-                           data=plan_payload([('22026-01-10', '100')]),
-                           follow_redirects=True)
+    response = post_plan(client, flat_id, [('22026-01-10', '100')])
 
-    assert response.status_code == 500      # should be 200 with a message
+    assert response.status_code == 200
+    assert 'Geçersiz tarih' in response.get_data(as_text=True)
     state = factory.installment_state(flat_id)
     assert len(state) == 1 and state[0][1] == D('777')
 
 
-def test_KNOWN_BUG_invalid_amount_gives_500_but_keeps_the_plan(client, factory):
+def test_invalid_amount_is_refused_with_a_message(client, factory):
     project_id = factory.project('plan hatali tutar')
     flat_id = factory.flat(project_id, total_price=D('0'))
     factory.installment(flat_id, JAN, D('777'))
     factory.commit()
 
-    response = client.post('/flat/%d/manage_plan' % flat_id,
-                           data=plan_payload([('2026-01-10', 'abc')]),
-                           follow_redirects=True)
+    response = post_plan(client, flat_id, [('2026-01-10', 'abc')])
 
-    assert response.status_code == 500      # should be 200 with a message
+    assert response.status_code == 200
+    assert 'Geçersiz tutar' in response.get_data(as_text=True)
     state = factory.installment_state(flat_id)
     assert len(state) == 1 and state[0][1] == D('777')
 
 
-def test_KNOWN_BUG_empty_plan_gives_500_but_keeps_the_plan(client, factory):
+def test_empty_plan_is_refused_with_a_message(client, factory):
     project_id = factory.project('plan bos')
     flat_id = factory.flat(project_id, total_price=D('0'))
     factory.installment(flat_id, JAN, D('777'))
     factory.commit()
 
-    response = client.post('/flat/%d/manage_plan' % flat_id,
-                           data=plan_payload([]), follow_redirects=True)
+    response = post_plan(client, flat_id, [])
 
-    assert response.status_code == 500      # should be 200 with a message
+    assert response.status_code == 200
+    assert 'En az bir taksit' in response.get_data(as_text=True)
     assert len(factory.installment_state(flat_id)) == 1
+
+
+def test_a_refused_plan_returns_to_the_plan_form_and_keeps_next(client,
+                                                                factory):
+    project_id = factory.project('plan hata next')
+    flat_id = factory.flat(project_id, total_price=D('0'))
+    factory.installment(flat_id, JAN, D('777'))
+    factory.commit()
+
+    response = post_plan(client, flat_id, [('2026-01-10', 'abc')],
+                         next_url='/debts')
+
+    assert response.request.path == '/flat/%d/manage_plan' % flat_id
+    assert 'value="/debts"' in response.get_data(as_text=True)
 
 
 def test_rows_with_a_missing_field_are_skipped(client, factory):

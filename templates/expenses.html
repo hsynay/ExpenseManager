@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 
 {% block title %}
     {% if detailed_view %}{{ project_name }} - Gider Yönetimi{% else %}Proje Giderleri{% endif %}
@@ -120,11 +121,13 @@
                 </thead>
                 <tbody>
                     {% for item in petty_cash_items %}
-                    <tr>
+                    {% set petty_return = url_for('list_expenses') + ('?' + current_query if current_query else '') + '#pc-' + item[0]|string %}
+                    <tr id="pc-{{ item[0] }}">
                         <td>{{ item[3].strftime('%d.%m.%Y') }}</td><td>{{ item[1] }}</td><td class="text-end fw-bold">{{ item[2]|thousands }} ₺</td>
                         <td class="text-end">
-                            <a href="{{ url_for('edit_petty_cash', item_id=item[0], project_id=project_id) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
+                            <a href="{{ url_for('edit_petty_cash', item_id=item[0], project_id=project_id, next=petty_return) }}" class="btn btn-sm btn-outline-primary me-1" title="Düzenle"><i class="fa-solid fa-edit"></i></a>
                             <form action="{{ url_for('delete_petty_cash', item_id=item[0]) }}" method="POST" class="d-inline">
+                                <input type="hidden" name="next" value="{{ petty_return }}">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="project_id" value="{{ project_id }}">
                                 <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu gideri silmek istediğinizden emin misiniz?')" title="Sil"><i class="fa-solid fa-trash"></i></button>
@@ -145,12 +148,13 @@
                 </tfoot>
                 {% endif %}
                 </table>
+            {{ pager(petty_pager, 'Küçük giderler') }}
         </div>
     </div>
 
     <h4 class="mt-5 mb-3">Planlı Büyük Giderler (Tedarikçi Borçları)</h4>
     {% for expense in expenses_data %}
-    <div class="card mb-4">
+    <div class="card mb-4" id="exp-{{ expense.expense_id }}">
         <div class="card-header bg-light d-flex justify-content-between align-items-center flex-wrap">
             <div>
                 <strong class="me-3"><i class="fa-solid fa-file-signature text-muted"></i> Gider: {{ expense.title }}</strong>
@@ -282,6 +286,8 @@
     {% else %}
         {% if detailed_view %}<div class="card text-center p-5"><p class="h5 text-muted">Bu proje için planlı gider bulunamadı.</p></div>{% endif %}
     {% endfor %}
+
+    {{ pager(expenses_pager, 'Büyük giderler') }}
 
     <div class="modal fade" id="addPettyCashModal" tabindex="-1">
         <div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Yeni Küçük Gider Ekle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>

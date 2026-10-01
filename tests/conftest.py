@@ -83,6 +83,11 @@ class Factory:
         return value
 
     def cleanup(self):
+        # A test that failed halfway leaves the transaction aborted, and every
+        # statement after that would fail too. Rolling back first drops the
+        # rows that were never committed and makes the connection usable for
+        # deleting the ones that were.
+        self.conn.rollback()
         for table, pk, value in reversed(self._created):
             self.cur.execute(
                 "DELETE FROM {t} WHERE {pk} = %s".format(t=table, pk=pk),
@@ -134,8 +139,11 @@ class Factory:
 
     # --- expense side ------------------------------------------------
     def supplier(self, project_id=None, name='Tedarikci'):
+        # suppliers.name is unique across the whole table, so a fixed name
+        # breaks the second supplier in a test, or two test runs at once.
         return self._insert('suppliers', {
-            'name': PREFIX + name, 'project_id': project_id})
+            'name': '%s%s %s' % (PREFIX, name, uuid.uuid4().hex[:8]),
+            'project_id': project_id})
 
     def expense(self, project_id, supplier_id=None, amount=Decimal('10000'),
                 title='gider', expense_date=None):

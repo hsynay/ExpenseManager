@@ -38,6 +38,12 @@
         html {
             scroll-behavior: smooth;
         }
+        /* The row a user returns to after an edit, marked for a moment. */
+        .return-highlight {
+            outline: 3px solid rgba(13, 110, 253, 0.55);
+            outline-offset: 2px;
+            transition: outline-color 0.6s;
+        }
     </style>
     {% block extra_head %}{% endblock %}
 </head>
@@ -216,6 +222,31 @@
             document.querySelectorAll('.thousands-input').forEach(function(el){ initInput(el); });
         });
     })();
+
+
+    /* Land on the row the user came from.
+     *
+     * Edit links carry a 'next' address ending in #row-id, so after a save
+     * the list opens at that row instead of at the top. Two things get in
+     * the way on their own: the fixed navbar covers whatever the browser
+     * scrolls to, and smooth scrolling starts before the page has its final
+     * height, so it can stop short. This waits for the full page, then jumps
+     * once, leaving room for the navbar, and briefly marks the row.
+     */
+    window.addEventListener('load', function () {
+        if (!location.hash || location.hash.length < 2) return;
+        var target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+        if (!target) return;
+        var nav = document.querySelector('nav.fixed-top');
+        var offset = (nav ? nav.offsetHeight : 0) + 12;
+        var root = document.documentElement;
+        var previous = root.style.scrollBehavior;
+        root.style.scrollBehavior = 'auto';
+        window.scrollTo(0, target.getBoundingClientRect().top + window.pageYOffset - offset);
+        root.style.scrollBehavior = previous;
+        target.classList.add('return-highlight');
+        setTimeout(function () { target.classList.remove('return-highlight'); }, 2000);
+    });
 
     // Scroll-to-top
     (function() {

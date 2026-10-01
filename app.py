@@ -14,6 +14,8 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.middleware.proxy_fix import ProxyFix
 import uuid
+from functools import wraps
+from urllib.parse import urlsplit, urlunsplit
 import random
 
 app = Flask(__name__)
@@ -273,6 +275,117 @@ def get_user_by_email(email):
     conn.close()
     return user 
 
+
+PAGE_SIZE = 50
+
+
+def get_page_number(arg_name='page'):
+    """Read a page number out of the query string.
+
+    Anything missing, negative or not a number means page 1, so a hand edited
+    address can never produce an error page.
+    """
+    try:
+        page = int(request.args.get(arg_name, 1))
+    except (TypeError, ValueError):
+        return 1
+    return page if page >= 1 else 1
+
+
+def page_window(page):
+    """(limit, offset) for a page.
+
+    The limit asks for one row more than a page holds. If that extra row comes
+    back there is a next page, which saves a second COUNT query on every list.
+    """
+    return PAGE_SIZE + 1, (page - 1) * PAGE_SIZE
+
+
+def build_pager(page, has_next, arg_name='page'):
+    """The previous and next links for one list.
+
+    Every other query parameter is carried over, so paging keeps the filters
+    and the sort order the user picked.
+    """
+    args = request.args.to_dict(flat=True)
+
+    def link(target_page):
+        merged = dict(args)
+        merged[arg_name] = target_page
+        return url_for(request.endpoint, **merged)
+
+    return {
+        'page': page,
+        'has_prev': page > 1,
+        'has_next': has_next,
+        'prev_url': link(page - 1) if page > 1 else None,
+        'next_url': link(page + 1) if has_next else None,
+    }
+
+
+def split_page(rows, page, arg_name='page'):
+    """Drop the extra row page_window asked for and build the links."""
+    has_next = len(rows) > PAGE_SIZE
+    return rows[:PAGE_SIZE], build_pager(page, has_next, arg_name)
+
+
+def safe_next(value):
+    """Return a 'next' address only when it points into this site.
+
+    'next' comes from the address bar or a form field, so anyone can put
+    https://another-site in it, and redirecting there after a save would hand
+    the user to a stranger. A path starting with a single slash is followed.
+    A full address is followed only when it names this host (the referrer
+    header looks like that), and then only its path part is kept. Anything
+    else returns None and the caller falls back to its own default page.
+    """
+    if not value:
+        return None
+    value = value.strip()
+    parts = urlsplit(value)
+    if parts.scheme or parts.netloc:
+        if parts.scheme not in ('http', 'https') or parts.netloc != request.host:
+            return None
+        value = urlunsplit(('', '', parts.path or '/', parts.query,
+                            parts.fragment))
+    if not value.startswith('/') or value.startswith('//') \
+            or value.startswith('/\\'):
+        return None
+    return value
+
+
+def login_required(view):
+    """Send anyone without a session to the login page.
+
+    Goes under @app.route, so the route registers this wrapper. wraps keeps
+    the original function name, which Flask uses as the endpoint name, so
+    every url_for call keeps working.
+    """
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return view(*args, **kwargs)
+    return wrapper
+
+
+def json_login_required(payload):
+    """Answer 401 with a JSON body instead of redirecting.
+
+    For the endpoints the browser calls from JavaScript: a redirect to the
+    login page would arrive as HTML where the caller expects JSON. The body
+    is passed in because the existing endpoints do not all use the same one.
+    """
+    def decorator(view):
+        @wraps(view)
+        def wrapper(*args, **kwargs):
+            if 'user_id' not in session:
+                return jsonify(payload), 401
+            return view(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
 @app.route("/ping")
 def ping():
     return jsonify({"status": "ok"}), 200
@@ -311,10 +424,8 @@ def logout():
     return redirect(url_for('login'))
 
 @app.route('/project/new', methods=['GET', 'POST'])
+@login_required
 def new_project():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     if request.method == 'POST':
         name = request.form['name']
         address = request.form['address']
@@ -354,14 +465,12 @@ def new_project():
 
 
 @app.route('/project/<int:project_id>/manage_flats', methods=['GET', 'POST'])
+@login_required
 def manage_flats(project_id):
     """
     Bir projedeki daireleri akıllıca yönetir (ekler, günceller, sahibi olmayanları siler).
     Mevcut ve satılmış daireleri korur.
     """
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -482,10 +591,8 @@ def repair_out_of_range_dates(conn, cur, columns, page):
 
 
 @app.route('/expenses', methods=['GET'])
+@login_required
 def list_expenses():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -534,6 +641,12 @@ def list_expenses():
     total_petty_cash_expense = Decimal(0)
     supplier_list = []
     large_titles, petty_titles = [], []
+
+    # The two lists on this page turn independently.
+    page = get_page_number()
+    pc_page = get_page_number('pc_page')
+    expenses_pager = build_pager(page, has_next=False)
+    petty_pager = build_pager(pc_page, has_next=False, arg_name='pc_page')
 
     try:
         # Safety net for out of range dates. See repair_out_of_range_dates.
@@ -596,8 +709,11 @@ def list_expenses():
                 expenses_sql += " AND e.title ILIKE %s"
                 expenses_params.append(f"%{title_filter}%")
             expenses_sql += " ORDER BY e.id DESC"
+            large_limit, large_offset = page_window(page)
+            expenses_sql += " LIMIT %s OFFSET %s"
+            expenses_params.extend([large_limit, large_offset])
             cur.execute(expenses_sql, tuple(expenses_params))
-            expenses_raw = cur.fetchall()
+            expenses_raw, expenses_pager = split_page(cur.fetchall(), page)
 
         # Küçük giderler
         if expense_type in ('all', 'petty'):
@@ -617,13 +733,22 @@ def list_expenses():
             # Python ile kesin sıralama
             is_reverse = (pc_order == 'desc')
             if pc_sort == 'amount':
-                petty_cash_items = sorted(raw_petty, key=lambda x: (x[2], x[3], x[0]), reverse=is_reverse)
+                petty_sorted = sorted(raw_petty, key=lambda x: (x[2], x[3], x[0]), reverse=is_reverse)
             else:
-                petty_cash_items = sorted(raw_petty, key=lambda x: (x[3], x[0]), reverse=is_reverse)
+                petty_sorted = sorted(raw_petty, key=lambda x: (x[3], x[0]), reverse=is_reverse)
+
+            # The total belongs to the whole list, so read it before cutting
+            # the page out. Sorting happens here rather than in SQL, so the
+            # page is cut here too.
+            total_petty_cash_expense = sum(item[2] for item in petty_sorted)
+            start = (pc_page - 1) * PAGE_SIZE
+            petty_cash_items = petty_sorted[start:start + PAGE_SIZE]
+            petty_pager = build_pager(
+                pc_page, has_next=len(petty_sorted) > start + PAGE_SIZE,
+                arg_name='pc_page')
         else:
             petty_cash_items = []
-
-        total_petty_cash_expense = sum(item[2] for item in petty_cash_items)
+            total_petty_cash_expense = Decimal(0)
 
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
         total_planned_expense = cur.fetchone()[0]
@@ -691,6 +816,8 @@ def list_expenses():
                            current_query=current_query,
                            pc_sort=pc_sort,            
                            pc_order=pc_order,
+                           expenses_pager=expenses_pager,
+                           petty_pager=petty_pager,
                            user_name=session.get('user_name'))
 
 
@@ -701,43 +828,13 @@ def select_project_for_expenses():
 
 # app.py içine eklenecek/değiştirilecek fonksiyonlar
 
-# YARDIMCI FONKSİYON: Gider ödemelerini taksitlerle eşleştirir.
-def reconcile_expense_payments(cur, expense_id):
-    """
-    Bir gidere ait tüm taksitlerin ödenen tutarlarını,
-    sadece GEÇERLİ ödemelere (nakit veya durumu 'karşılıksız' olmayan çekler)
-    göre baştan hesaplar.
-    """
-    # 1. Gider için yapılan GEÇERLİ ödemelerin toplamını al
-    cur.execute("""
-        SELECT COALESCE(SUM(sp.amount), 0)
-        FROM supplier_payments sp
-        LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
-        WHERE sp.expense_id = %s AND (sp.payment_method = 'nakit' OR oc.status != 'karsiliksiz')
-    """, (expense_id,))
-    total_valid_paid = cur.fetchone()[0]
-
-    # 2. İlgili giderin tüm taksitlerini sıfırla
-    cur.execute("UPDATE expense_schedule SET paid_amount = 0, is_paid = FALSE WHERE expense_id = %s", (expense_id,))
-    
-    # 3. Hesaplanan doğru tutarı taksitlere baştan dağıt
-    amount_to_distribute = total_valid_paid
-    cur.execute("SELECT id, amount FROM expense_schedule WHERE expense_id = %s ORDER BY due_date ASC", (expense_id,))
-    installments = cur.fetchall()
-    for inst_id, total_amount in installments:
-        if amount_to_distribute <= 0: break
-        payment_for_this_inst = min(amount_to_distribute, total_amount)
-        is_paid = (payment_for_this_inst >= total_amount)
-        cur.execute("UPDATE expense_schedule SET paid_amount = %s, is_paid = %s WHERE id = %s", (payment_for_this_inst, is_paid, inst_id))
-        amount_to_distribute -= payment_for_this_inst
 
 @app.route('/supplier_payment/<int:payment_id>/edit', methods=['GET', 'POST'])
+@login_required
 def edit_supplier_payment(payment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
     conn = get_connection()
     cur = conn.cursor()
+    next_url = safe_next(request.form.get('next') or request.args.get('next'))
     
     # --- FORM GÖNDERİLDİĞİNDE (POST İSTEĞİ) ---
     if request.method == 'POST':
@@ -763,14 +860,14 @@ def edit_supplier_payment(payment_id):
                 cur.execute("UPDATE outgoing_checks SET amount = %s, issue_date = %s, due_date = %s WHERE id = %s",
                             (amount, payment_date, check_due_date, check_id))
 
-            reconcile_expense_payments(cur, expense_id)
+            reconcile_supplier_payments(cur, expense_id)
             
             conn.commit()
             flash('Gider ödemesi başarıyla güncellendi.', 'success')
             
             cur.execute("SELECT project_id FROM expenses WHERE id = %s", (expense_id,))
             project_id = cur.fetchone()[0]
-            return redirect(url_for('list_expenses', project_id=project_id))
+            return redirect(next_url or url_for('list_expenses', project_id=project_id))
 
         except ValidationError as e:
             conn.rollback()
@@ -783,7 +880,8 @@ def edit_supplier_payment(payment_id):
         finally:
             cur.close()
             conn.close()
-        return redirect(url_for('edit_supplier_payment', payment_id=payment_id))
+        return redirect(url_for('edit_supplier_payment', payment_id=payment_id,
+                                next=next_url or None))
 
     # --- SAYFA İLK AÇILDIĞINDA (GET İSTEĞİ) ---
     # DÜZELTME BURADA: Veritabanından gelen 'tuple' verisini bir 'dictionary' (sözlük) haline getiriyoruz.
@@ -824,20 +922,19 @@ def edit_supplier_payment(payment_id):
         cur.close()
         conn.close()
 
-    return render_template('edit_supplier_payment.html', payment=payment, payment_id=payment_id, user_name=session.get('user_name'))
+    return render_template('edit_supplier_payment.html', payment=payment, payment_id=payment_id,
+                           next_url=next_url or '', user_name=session.get('user_name'))
 
 @app.route('/supplier_payment/<int:payment_id>/delete', methods=['POST'])
+@login_required
 def delete_supplier_payment(payment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
     conn = get_connection()
     cur = conn.cursor()
     try:
         cur.execute("SELECT expense_id FROM supplier_payments WHERE id = %s", (payment_id,))
         expense_id = cur.fetchone()[0]
         cur.execute("DELETE FROM supplier_payments WHERE id = %s", (payment_id,))
-        reconcile_expense_payments(cur, expense_id)
+        reconcile_supplier_payments(cur, expense_id)
         log_audit(cur, session.get('user_id'), 'supplier_payment_delete', 'supplier_payment', payment_id,
                   {'expense_id': expense_id})
         conn.commit()
@@ -851,16 +948,15 @@ def delete_supplier_payment(payment_id):
         cur.close()
         conn.close()
     project_id = request.form.get('project_id')
-    return redirect(url_for('list_expenses', project_id=project_id))
+    next_url = safe_next(request.form.get('next'))
+    return redirect(next_url or url_for('list_expenses', project_id=project_id))
 
 
 # new_supplier_payment fonksiyonu
 
 @app.route('/supplier_payment/new', methods=['GET', 'POST'])
+@login_required
 def new_supplier_payment():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -1047,10 +1143,8 @@ def new_supplier_payment():
 #                            user_name=session.get('user_name'))
 
 @app.route('/project/<int:project_id>/expense/new', methods=['GET', 'POST'])
+@login_required
 def add_expense(project_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -1164,16 +1258,14 @@ def add_expense(project_id):
 # pay_expense_installment fonksiyonu
 
 @app.route('/expense_installment/<int:installment_id>/pay', methods=['GET', 'POST'])
+@login_required
 def pay_expense_installment(installment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
     if request.method == 'POST':
         try:
-            next_url = request.form.get('next') or request.args.get('next')
+            next_url = safe_next(request.form.get('next') or request.args.get('next'))
 
             # Double submit guard. It runs before any write and on this same
             # transaction, so a second click cannot record the payment and its
@@ -1277,10 +1369,8 @@ def pay_expense_installment(installment_id):
 # assign_flat_owner fonksiyonu
 
 @app.route('/assign_flat_owner', methods=['GET', 'POST'])
+@login_required
 def assign_flat_owner():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -1388,10 +1478,8 @@ def assign_flat_owner():
 # app.py içindeki debt_status fonksiyonunu bulun ve güncelleyin
 
 @app.route('/debts')
+@login_required
 def debt_status():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     projects_data = []
@@ -1591,11 +1679,9 @@ def debt_status():
                            user_name=session.get('user_name'))
 
 @app.route('/project/<int:project_id>/edit', methods=['GET', 'POST'])
+@login_required
 def edit_project(project_id):
     """Mevcut bir projeyi düzenler ve daire sayısı artarsa daire ekleme sayfasına yönlendirir."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -1639,11 +1725,9 @@ def edit_project(project_id):
     return render_template('edit_project.html', project=project, user_name=session.get('user_name'))
 
 @app.route('/project/<int:project_id>/delete', methods=['POST'])
+@login_required
 def delete_project(project_id):
     """Bir projeyi ve ona bağlı tüm verileri (ilişkili tüm çekler dahil) siler."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -1703,10 +1787,8 @@ def delete_project(project_id):
     return redirect(url_for('dashboard'))
 
 @app.route('/delete_flat_owner_data', methods=['POST'])
+@json_login_required({'success': False, 'message': 'Yetkisiz erişim'})
 def delete_flat_owner_data():
-    if 'user_id' not in session:
-        return jsonify({'success': False, 'message': 'Yetkisiz erişim'}), 401
-
     data = request.get_json()
     flat_id = data.get('flat_id')
 
@@ -1750,14 +1832,14 @@ def delete_flat_owner_data():
         conn.close()
 
 @app.route('/customers')
+@login_required
 def list_customers():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     
     search_query = request.args.get('search', '').strip()
+    page = get_page_number()
+    customers_pager = build_pager(page, has_next=False)
 
     try:
         # 1. Müşterileri Çek
@@ -1767,9 +1849,13 @@ def list_customers():
             sql_customers += " WHERE first_name ILIKE %s OR last_name ILIKE %s"
             params.extend([f"%{search_query}%", f"%{search_query}%"])
         sql_customers += " ORDER BY first_name, last_name"
-        
+
+        limit, offset = page_window(page)
+        sql_customers += " LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+
         cur.execute(sql_customers, params)
-        customers_raw = cur.fetchall()
+        customers_raw, customers_pager = split_page(cur.fetchall(), page)
 
         # 2. Daireleri ve Proje Bilgilerini Çek
         cur.execute("""
@@ -1877,13 +1963,13 @@ def list_customers():
         cur.close()
         conn.close()
 
-    return render_template('customers.html', customers_data=customers_data, user_name=session.get('user_name'))
+    return render_template('customers.html', customers_data=customers_data,
+                           customers_pager=customers_pager,
+                           user_name=session.get('user_name'))
 
 @app.route('/checks')
+@login_required
 def list_checks():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     
@@ -1898,6 +1984,12 @@ def list_checks():
     # Hata durumunda boş dönmeleri için burada tanımlıyoruz
     incoming_checks, outgoing_checks = [], []
     incoming_parties, outgoing_parties = [], []
+
+    # The two lists page independently, so they need a parameter each.
+    in_page = get_page_number('in_page')
+    out_page = get_page_number('out_page')
+    incoming_pager = build_pager(in_page, has_next=False, arg_name='in_page')
+    outgoing_pager = build_pager(out_page, has_next=False, arg_name='out_page')
     
     in_due_from = request.args.get('in_due_from')
     in_due_to = request.args.get('in_due_to')
@@ -1949,8 +2041,12 @@ def list_checks():
             in_sql += " AND c.status = %s"
             in_params.append(in_status)
         in_sql += " ORDER BY c.due_date ASC"
+        in_limit, in_offset = page_window(in_page)
+        in_sql += " LIMIT %s OFFSET %s"
+        in_params.extend([in_limit, in_offset])
         cur.execute(in_sql, tuple(in_params))
-        incoming_checks = cur.fetchall()
+        incoming_checks, incoming_pager = split_page(cur.fetchall(), in_page,
+                                                     'in_page')
 
         # Verilen Çekleri Çek (Tedarikçilere)
         cur.execute("""
@@ -1991,8 +2087,12 @@ def list_checks():
             out_sql += " AND oc.status = %s"
             out_params.append(out_status)
         out_sql += " ORDER BY oc.due_date ASC"
+        out_limit, out_offset = page_window(out_page)
+        out_sql += " LIMIT %s OFFSET %s"
+        out_params.extend([out_limit, out_offset])
         cur.execute(out_sql, tuple(out_params))
-        outgoing_checks = cur.fetchall()
+        outgoing_checks, outgoing_pager = split_page(cur.fetchall(), out_page,
+                                                     'out_page')
 
     except Exception:
         app.logger.exception('Failed to list checks')
@@ -2024,16 +2124,15 @@ def list_checks():
                            in_status=in_status,
                            out_due_from=out_due_from, out_due_to=out_due_to, out_supplier=out_supplier,
                            out_status=out_status,
-                           incoming_parties=incoming_parties, outgoing_parties=outgoing_parties
+                           incoming_parties=incoming_parties, outgoing_parties=outgoing_parties,
+                           incoming_pager=incoming_pager, outgoing_pager=outgoing_pager
                            )
 
 
 # update_check_status fonksiyonu
 @app.route('/check/update_status', methods=['POST'])
+@login_required
 def update_check_status():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     check_id = request.form.get('check_id')
     check_type = request.form.get('check_type') 
     new_status = request.form.get('new_status')
@@ -2092,16 +2191,15 @@ def update_check_status():
         cur.close()
         conn.close()
 
-    next_url = request.form.get('next') or request.referrer or url_for('debt_status')
+    next_url = (safe_next(request.form.get('next'))
+                or safe_next(request.referrer) or url_for('debt_status'))
     return redirect(next_url)
 
 
 @app.route('/reports/cooperative/select', methods=['GET', 'POST'])
+@login_required
 def select_project_for_coop_report():
     """Kooperatif raporu için proje seçim sayfası."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     if request.method == 'POST':
         project_id = request.form.get('project_id')
         if project_id:
@@ -2131,11 +2229,9 @@ def select_project_for_coop_report():
 # cooperative_report fonksiyonu
 
 @app.route('/reports/cooperative/<int:project_id>/<int:year>/<int:month>')
+@login_required
 def cooperative_report(project_id, year, month):
     """Belirli bir kooperatif projesinin aylık finansal raporunu gösterir."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     report_data = {}
@@ -2381,10 +2477,8 @@ def cooperative_report(project_id, year, month):
 # app.py'deki mevcut project_transactions fonksiyonunu bu kodla değiştirin
 
 @app.route('/project/<int:project_id>/transactions', methods=['GET'])
+@login_required
 def project_transactions(project_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -2558,10 +2652,8 @@ def project_transactions(project_id):
 
 
 @app.route('/project/<int:project_id>/overview')
+@login_required
 def project_overview(project_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     
@@ -2810,15 +2902,13 @@ def project_overview(project_id):
 
 
 @app.route('/project/<int:project_id>/petty_cash/add', methods=['POST'])
+@login_required
 def add_petty_cash(project_id):
     """Bir projeye yeni bir küçük gider ekler."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     # Read this before the try block. The last line of this function needs it
     # even when the amount below cannot be parsed, and reading it inside the
     # try would leave it undefined on that path.
-    next_url = request.form.get('next')
+    next_url = safe_next(request.form.get('next'))
 
     try:
         title = request.form.get('petty_cash_title')
@@ -2862,11 +2952,10 @@ def add_petty_cash(project_id):
 
 
 @app.route('/petty_cash/<int:item_id>/delete', methods=['POST'])
+@login_required
 def delete_petty_cash(item_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
     project_id = request.form.get('project_id')
-    next_url = request.form.get('next')
+    next_url = safe_next(request.form.get('next'))
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -2888,9 +2977,8 @@ def delete_petty_cash(item_id):
 
 
 @app.route('/petty_cash/<int:item_id>/edit', methods=['GET', 'POST'])
+@login_required
 def edit_petty_cash(item_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
     conn = get_connection()
     cur = conn.cursor()
     if request.method == 'POST':
@@ -2899,7 +2987,7 @@ def edit_petty_cash(item_id):
         amount = Decimal(amount_raw.replace('.', '').replace(',', '.'))
         description = request.form.get('description')
         project_id = request.args.get('project_id') or request.form.get('project_id')
-        next_url = request.form.get('next')
+        next_url = safe_next(request.form.get('next'))
         try:
             expense_date = parse_form_date(request.form.get('expense_date'),
                                            "Tarih")
@@ -2937,16 +3025,14 @@ def edit_petty_cash(item_id):
 
 # 4. Gider (Tedarikçi) Planı Yönetme Rotası
 @app.route('/expense/<int:expense_id>/manage_plan', methods=['GET', 'POST'])
+@login_required
 def manage_expense_plan(expense_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
     if request.method == 'POST':
         try:
-            next_url = request.form.get('next') or request.args.get('next')
+            next_url = safe_next(request.form.get('next') or request.args.get('next'))
             plan_json = request.form.get('plan_json')
             rows_raw = []
             if plan_json:
@@ -3029,11 +3115,9 @@ def manage_expense_plan(expense_id):
 
 
 @app.route('/expense/<int:expense_id>/delete', methods=['POST'])
+@login_required
 def delete_expense(expense_id):
     """Belirli bir gideri ve varsa ilişkili çekini veritabanından siler."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     project_id = request.form.get('project_id')
 
     conn = get_connection()
@@ -3072,10 +3156,8 @@ def delete_expense(expense_id):
 
 
 @app.route('/audit-logs')
+@login_required
 def audit_logs():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     action_filter = request.args.get('action', '').strip()
     entity_filter = request.args.get('entity_type', '').strip()
     user_filter = request.args.get('user', '').strip()
@@ -3182,14 +3264,12 @@ def audit_logs():
 # get_flats_for_project fonksiyonu
 
 @app.route('/api/project/<int:project_id>/flats')
+@json_login_required({'error': 'Yetkisiz erişim'})
 def get_flats_for_project(project_id):
     """
     Bir projeye ait, sahibi olan daireleri listeler.
     Daire metninde blok, kat, no ve sahip ismini içerir.
     """
-    if 'user_id' not in session:
-        return jsonify({'error': 'Yetkisiz erişim'}), 401
-
     conn = get_connection()
     cur = conn.cursor()
     
@@ -3217,16 +3297,14 @@ def get_flats_for_project(project_id):
 # app.py dosyasındaki manage_payment_plan fonksiyonunu bununla değiştirin:
 
 @app.route('/flat/<int:flat_id>/manage_plan', methods=['GET', 'POST'])
+@login_required
 def manage_payment_plan(flat_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
     if request.method == 'POST':
         try:
-            next_url = request.form.get('next') or request.args.get('next')
+            next_url = safe_next(request.form.get('next') or request.args.get('next'))
             plan_json = request.form.get('plan_json')
 
             # --- 1) Form verisini oku ---
@@ -3304,6 +3382,11 @@ def manage_payment_plan(flat_id):
         except ValidationError as e:
             conn.rollback()
             flash(str(e), 'danger')
+            # Back to the plan form, which shows the message and keeps the
+            # 'next' address for the save that follows. Going on to next_url
+            # here would lose the message: /debts does not render flashes.
+            return redirect(url_for('manage_payment_plan', flat_id=flat_id,
+                                    next=next_url or None))
         except Exception:
             conn.rollback()
             app.logger.exception('Failed to update the payment plan of flat %s',
@@ -3339,11 +3422,9 @@ def manage_payment_plan(flat_id):
 # print_debt_statement fonksiyonu
 
 @app.route('/flat/<int:flat_id>/print')
+@login_required
 def print_debt_statement(flat_id):
     """Belirli bir dairenin borç dökümünü yazdırma için hazırlar."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -3453,10 +3534,8 @@ def print_debt_statement(flat_id):
 # list_payments fonksiyonu
 
 @app.route('/payments')
+@login_required
 def list_payments():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     # Filtreleme parametreleri
     project = request.args.get('project')
     start = request.args.get('start_date')
@@ -3503,10 +3582,15 @@ def list_payments():
 
     sql += f" ORDER BY {order_by_column} {order.upper()}"
 
+    page = get_page_number()
+    limit, offset = page_window(page)
+    sql += " LIMIT %s OFFSET %s"
+    params.extend([limit, offset])
+
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(sql, tuple(params))
-    payments = cur.fetchall()
+    payments, payments_pager = split_page(cur.fetchall(), page)
     
     cur.execute("SELECT name FROM projects ORDER BY name")
     all_projects = [r[0] for r in cur.fetchall()]
@@ -3519,6 +3603,7 @@ def list_payments():
 
     return render_template('payments.html',
                            payments=payments,
+                           payments_pager=payments_pager,
                            all_projects=all_projects,
                            all_customers=all_customers,
                            selected_project=project,
@@ -3529,10 +3614,8 @@ def list_payments():
                            order=order,
                            user_name=session.get('user_name'))
 @app.route('/reports')
+@login_required
 def reports():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     today = date.today()
@@ -3994,10 +4077,8 @@ def reports():
 
 # dashboard fonksiyonu
 @app.route('/dashboard')
+@login_required
 def dashboard():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     today = date.today()
@@ -4104,11 +4185,9 @@ def dashboard():
 
 
 @app.route('/api/monthly_payments')
+@json_login_required({'error': 'Yetkisiz erişim'})
 def monthly_payments_api():
     """Son 12 ayın aylık toplam ödemelerini JSON formatında döndürür."""
-    if 'user_id' not in session:
-        return jsonify({'error': 'Yetkisiz erişim'}), 401
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -4160,10 +4239,8 @@ def index():
 
 @app.route('/payment/new', defaults={'installment_id': None}, methods=['GET', 'POST'])
 @app.route('/payment/new/<int:installment_id>', methods=['GET', 'POST'])
+@login_required
 def new_payment(installment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -4177,7 +4254,7 @@ def new_payment(installment_id):
                 flash('Bu işlem zaten kaydedilmişti.', 'info')
                 return redirect(request.form.get('next') or request.args.get('next') or url_for('debt_status'))
 
-            next_url = request.form.get('next') or request.args.get('next')
+            next_url = safe_next(request.form.get('next') or request.args.get('next'))
             flat_id = int(request.form.get('flat_id'))
             # Formdan gelen formatlı sayıyı temizleyerek Decimal'e çeviriyoruz
             payment_amount_str = request.form.get('amount')
@@ -4383,9 +4460,8 @@ def reconcile_supplier_payments(cur, expense_id):
                            
 # GÜNCELLENMİŞ FONKSİYON: delete_payment
 @app.route('/payment/<int:payment_id>/delete', methods=['POST'])
+@login_required
 def delete_payment(payment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -4462,14 +4538,13 @@ def reconcile_customer_payments(cur, flat_id):
 
 # GÜNCELLENMİŞ FONKSİYON: edit_payment
 @app.route('/payment/<int:payment_id>/edit', methods=['GET', 'POST'])
+@login_required
 def edit_payment(payment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
     conn = get_connection()
     cur = conn.cursor()
     if request.method == 'POST':
         try:
-            next_url = request.form.get('next') or request.args.get('next')
+            next_url = safe_next(request.form.get('next') or request.args.get('next'))
             amount = Decimal(request.form.get('amount').replace('.', '').replace(',', '.'))
             payment_date_str = request.form.get('payment_date')
             description = request.form.get('description')
