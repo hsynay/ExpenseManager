@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from dateutil.relativedelta import relativedelta
 from calendar import monthrange
-from db import get_connection
+from db import get_connection, release_request_connections
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
 from datetime import date, datetime, timedelta
@@ -266,13 +266,21 @@ def claim_submission_token(cur, token, endpoint):
     return True
 
 
+@app.teardown_appcontext
+def return_db_connections(exc):
+    """Put back any pooled connection this request did not close itself."""
+    release_request_connections(exc)
+
+
 def get_user_by_email(email):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, email, password_hash, full_name FROM users WHERE email = %s", (email,))
-    user = cur.fetchone()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("SELECT id, email, password_hash, full_name FROM users WHERE email = %s", (email,))
+        user = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
     return user 
 
 
@@ -435,30 +443,29 @@ def new_project():
 
         conn = get_connection()
         cur = conn.cursor()
+        try:
 
-        # Double submit guard, in the same transaction as the insert below.
-        # This route has no try/finally, so close the connection by hand here.
-        if not claim_submission_token(cur, request.form.get('submission_token'), 'new_project'):
-            conn.rollback()
+            # Double submit guard, in the same transaction as the insert below.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'new_project'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(url_for('dashboard'))
+
+            cur.execute("""
+                INSERT INTO projects (name, address, project_type, total_floors, total_flats)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+            """, (name, address, project_type, floors, flats))
+            project_id = cur.fetchone()[0]  # Proje ID'yi al
+            log_audit(cur, session.get('user_id'), 'project_create', 'project', project_id,
+                      {'name': name, 'type': project_type, 'floors': floors, 'flats': flats})
+            conn.commit()
+
+            flash('Proje başarıyla eklendi. Şimdi daireleri tanımlayabilirsiniz.', 'success')
+            return redirect(url_for('manage_flats', project_id=project_id)) # YENİ YÖNLENDİRME
+        finally:
             cur.close()
             conn.close()
-            flash('Bu işlem zaten kaydedilmişti.', 'info')
-            return redirect(url_for('dashboard'))
-
-        cur.execute("""
-            INSERT INTO projects (name, address, project_type, total_floors, total_flats)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id
-        """, (name, address, project_type, floors, flats))
-        project_id = cur.fetchone()[0]  # Proje ID'yi al
-        log_audit(cur, session.get('user_id'), 'project_create', 'project', project_id,
-                  {'name': name, 'type': project_type, 'floors': floors, 'flats': flats})
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        flash('Proje başarıyla eklendi. Şimdi daireleri tanımlayabilirsiniz.', 'success')
-        return redirect(url_for('manage_flats', project_id=project_id)) # YENİ YÖNLENDİRME
 
     return render_template('project_new.html')
 
@@ -1485,6 +1492,7 @@ def debt_status():
     projects_data = []
     project_filter = request.args.get('project_id', type=int)
     flat_filter = request.args.get('flat_id', type=int)
+    search_query = (request.args.get('search') or '').strip()
     selected_project_name = None
     selected_flat_desc = None
 
@@ -1510,6 +1518,11 @@ def debt_status():
         if flat_filter:
             flats_sql += " AND f.id = %s"
             flats_params.append(flat_filter)
+        if search_query:
+            like = f"%{search_query}%"
+            flats_sql += (" AND (c.first_name ILIKE %s OR c.last_name ILIKE %s"
+                          " OR (c.first_name || ' ' || c.last_name) ILIKE %s)")
+            flats_params.extend([like, like, like])
         flats_sql += " ORDER BY p.name, f.block_name, f.floor, f.flat_no"
         cur.execute(flats_sql, tuple(flats_params))
         owned_flats = cur.fetchall()
@@ -2211,11 +2224,13 @@ def select_project_for_coop_report():
     
     conn = get_connection()
     cur = conn.cursor()
-    # Sadece kooperatif projelerini listele
-    cur.execute("SELECT id, name FROM projects WHERE project_type = 'cooperative' ORDER BY name")
-    projects = cur.fetchall()
-    cur.close()
-    conn.close()
+    try:
+        # Sadece kooperatif projelerini listele
+        cur.execute("SELECT id, name FROM projects WHERE project_type = 'cooperative' ORDER BY name")
+        projects = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
     
     # Varsayılan olarak bir önceki ayı seçili getir
     last_month = date.today().replace(day=1) - relativedelta(days=1)
@@ -3272,19 +3287,21 @@ def get_flats_for_project(project_id):
     """
     conn = get_connection()
     cur = conn.cursor()
+    try:
     
-    cur.execute("""
-        SELECT 
-            f.id, f.flat_no, f.floor, f.room_type, f.block_name,
-            c.first_name, c.last_name
-        FROM flats f
-        JOIN customers c ON f.owner_id = c.id
-        WHERE f.project_id = %s AND f.owner_id IS NOT NULL
-        ORDER BY f.block_name, f.floor, f.flat_no
-    """, (project_id,))
-    flats_raw = cur.fetchall()
-    cur.close()
-    conn.close()
+        cur.execute("""
+            SELECT 
+                f.id, f.flat_no, f.floor, f.room_type, f.block_name,
+                c.first_name, c.last_name
+            FROM flats f
+            JOIN customers c ON f.owner_id = c.id
+            WHERE f.project_id = %s AND f.owner_id IS NOT NULL
+            ORDER BY f.block_name, f.floor, f.flat_no
+        """, (project_id,))
+        flats_raw = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
 
     flats = [{
         'id': f[0], 
@@ -3541,6 +3558,7 @@ def list_payments():
     start = request.args.get('start_date')
     end = request.args.get('end_date')
     customer_id = request.args.get('customer_id')
+    search = (request.args.get('search') or '').strip()
     
     # Sıralama parametreleri
     sort_by = request.args.get('sort_by', 'tarih')
@@ -3576,6 +3594,12 @@ def list_payments():
     if customer_id:
         filters.append("c.id = %s")
         params.append(customer_id)
+    if search:
+        like = f"%{search}%"
+        filters.append("(c.first_name ILIKE %s OR c.last_name ILIKE %s"
+                       " OR (c.first_name || ' ' || c.last_name) ILIKE %s"
+                       " OR p.description ILIKE %s)")
+        params.extend([like, like, like, like])
 
     if filters:
         sql += " WHERE " + " AND ".join(filters)
@@ -3589,17 +3613,19 @@ def list_payments():
 
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(sql, tuple(params))
-    payments, payments_pager = split_page(cur.fetchall(), page)
+    try:
+        cur.execute(sql, tuple(params))
+        payments, payments_pager = split_page(cur.fetchall(), page)
     
-    cur.execute("SELECT name FROM projects ORDER BY name")
-    all_projects = [r[0] for r in cur.fetchall()]
+        cur.execute("SELECT name FROM projects ORDER BY name")
+        all_projects = [r[0] for r in cur.fetchall()]
     
-    cur.execute("SELECT id, first_name, last_name FROM customers ORDER BY first_name, last_name")
-    all_customers = cur.fetchall()
+        cur.execute("SELECT id, first_name, last_name FROM customers ORDER BY first_name, last_name")
+        all_customers = cur.fetchall()
     
-    cur.close()
-    conn.close()
+    finally:
+        cur.close()
+        conn.close()
 
     return render_template('payments.html',
                            payments=payments,
@@ -3641,6 +3667,84 @@ def reports():
     try:
         cur.execute("SELECT id, name, project_type FROM projects ORDER BY name")
         projects = cur.fetchall()
+
+        # --- 12 month charts, for every project at once ---------------------
+        # Each chart used to run its own query per project and per month.
+        # These five queries return the same sums grouped by project and
+        # month; the project loop below only looks them up. Every query keeps
+        # the joins and filters of the one it replaced, so no number changes.
+        chart_months = [add_months(start_month, -offset)
+                        for offset in range(11, -1, -1)]
+        window_start = chart_months[0]
+        window_end = add_months(start_month, 1)
+        window = (window_start, window_end)
+
+        # Real income: cash and cleared checks.
+        cur.execute("""
+            SELECT f.project_id,
+                   date_trunc('month', p.payment_date)::date,
+                   COALESCE(SUM(p.amount), 0)
+            FROM payments p
+            JOIN flats f ON p.flat_id = f.id
+            LEFT JOIN checks c ON p.check_id = c.id
+            WHERE (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
+              AND p.payment_date >= %s AND p.payment_date < %s
+            GROUP BY 1, 2
+        """, window)
+        chart_income = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+
+        # Real expense, large: cash and paid outgoing checks.
+        cur.execute("""
+            SELECT e.project_id,
+                   date_trunc('month', sp.payment_date)::date,
+                   COALESCE(SUM(sp.amount), 0)
+            FROM supplier_payments sp
+            JOIN expenses e ON sp.expense_id = e.id
+            LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
+            WHERE (sp.payment_method = 'nakit' OR oc.status = 'odendi')
+              AND sp.payment_date >= %s AND sp.payment_date < %s
+            GROUP BY 1, 2
+        """, window)
+        chart_large = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+
+        # Real expense, petty cash.
+        cur.execute("""
+            SELECT project_id,
+                   date_trunc('month', expense_date)::date,
+                   COALESCE(SUM(amount), 0)
+            FROM petty_cash_expenses
+            WHERE expense_date >= %s AND expense_date < %s
+            GROUP BY 1, 2
+        """, window)
+        chart_petty = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+
+        # Incoming checks by due month, in the portfolio and cleared.
+        cur.execute("""
+            SELECT f.project_id, c.status,
+                   date_trunc('month', c.due_date)::date,
+                   COALESCE(SUM(c.amount), 0)
+            FROM checks c
+            JOIN payments p ON c.id = p.check_id
+            JOIN flats f ON p.flat_id = f.id
+            WHERE c.status IN ('portfoyde', 'tahsil_edildi')
+              AND c.due_date >= %s AND c.due_date < %s
+            GROUP BY 1, 2, 3
+        """, window)
+        chart_in_checks = {(r[0], r[1], r[2]): r[3] for r in cur.fetchall()}
+
+        # Outgoing checks by due month, handed over and paid.
+        cur.execute("""
+            SELECT e.project_id, oc.status,
+                   date_trunc('month', oc.due_date)::date,
+                   COALESCE(SUM(oc.amount), 0)
+            FROM outgoing_checks oc
+            JOIN supplier_payments sp ON oc.id = sp.check_id
+            JOIN expenses e ON sp.expense_id = e.id
+            WHERE oc.status IN ('verildi', 'odendi')
+              AND oc.due_date >= %s AND oc.due_date < %s
+            GROUP BY 1, 2, 3
+        """, window)
+        chart_out_checks = {(r[0], r[1], r[2]): r[3] for r in cur.fetchall()}
 
         for project_id, project_name, project_type in projects:
             summary = {
@@ -3734,54 +3838,15 @@ def reports():
                     'unpaid_installments': unpaid_installments
                 })
 
-                # --- Aylık gelir-gider (son 12 ay) ---
-                labels, income_series, expense_series = [], [], []
-                for offset in range(11, -1, -1):
-                    month_start = add_months(start_month, -offset)
-                    month_end = add_months(month_start, 1)
-                    labels.append(month_start.strftime("%b %Y"))
-
-                    # Gerçekleşen gelir (nakit + tahsil edilen çek)
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(p.amount), 0)
-                        FROM payments p
-                        JOIN flats f ON p.flat_id = f.id
-                        LEFT JOIN checks c ON p.check_id = c.id
-                        WHERE f.project_id = %s
-                          AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
-                          AND p.payment_date >= %s AND p.payment_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    income_series.append(float(cur.fetchone()[0]))
-
-                    # Gerçekleşen gider (nakit + ödenmiş çek)
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(sp.amount), 0)
-                        FROM supplier_payments sp
-                        JOIN expenses e ON sp.expense_id = e.id
-                        LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
-                        WHERE e.project_id = %s
-                          AND (sp.payment_method = 'nakit' OR oc.status = 'odendi')
-                          AND sp.payment_date >= %s AND sp.payment_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    paid_large = float(cur.fetchone()[0])
-
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(amount), 0)
-                        FROM petty_cash_expenses
-                        WHERE project_id = %s
-                          AND expense_date >= %s AND expense_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    petty_paid = float(cur.fetchone()[0])
-
+                # --- 12 month income and expense (from the grouped queries) ---
+                # float() on each part, then the sum: the same arithmetic the
+                # per month queries did, so the floats come out identical.
+                labels = [m.strftime("%b %Y") for m in chart_months]
+                income_series, expense_series = [], []
+                for m in chart_months:
+                    income_series.append(float(chart_income.get((project_id, m), 0)))
+                    paid_large = float(chart_large.get((project_id, m), 0))
+                    petty_paid = float(chart_petty.get((project_id, m), 0))
                     expense_series.append(paid_large + petty_paid)
 
                 net_series = [inc - exp for inc, exp in zip(income_series, expense_series)]
@@ -3792,71 +3857,17 @@ def reports():
                     'net': net_series
                 }
 
-                # --- Aylık çek durumu (son 12 ay) ---
-                chk_labels = labels  # aynı etiketler
-                in_port, in_clear, out_given, out_paid = [], [], [], []
-                for offset in range(11, -1, -1):
-                    month_start = add_months(start_month, -offset)
-                    month_end = add_months(month_start, 1)
-
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(c.amount), 0)
-                        FROM checks c
-                        JOIN payments p ON c.id = p.check_id
-                        JOIN flats f ON p.flat_id = f.id
-                        WHERE f.project_id = %s AND c.status = 'portfoyde'
-                          AND c.due_date >= %s AND c.due_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    in_port.append(float(cur.fetchone()[0]))
-
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(c.amount), 0)
-                        FROM checks c
-                        JOIN payments p ON c.id = p.check_id
-                        JOIN flats f ON p.flat_id = f.id
-                        WHERE f.project_id = %s AND c.status = 'tahsil_edildi'
-                          AND c.due_date >= %s AND c.due_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    in_clear.append(float(cur.fetchone()[0]))
-
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(oc.amount), 0)
-                        FROM outgoing_checks oc
-                        JOIN supplier_payments sp ON oc.id = sp.check_id
-                        JOIN expenses e ON sp.expense_id = e.id
-                        WHERE e.project_id = %s AND oc.status = 'verildi'
-                          AND oc.due_date >= %s AND oc.due_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    out_given.append(float(cur.fetchone()[0]))
-
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(oc.amount), 0)
-                        FROM outgoing_checks oc
-                        JOIN supplier_payments sp ON oc.id = sp.check_id
-                        JOIN expenses e ON sp.expense_id = e.id
-                        WHERE e.project_id = %s AND oc.status = 'odendi'
-                          AND oc.due_date >= %s AND oc.due_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    out_paid.append(float(cur.fetchone()[0]))
+                # --- 12 month check status (from the grouped queries) ---
+                def check_line(sums, status):
+                    return [float(sums.get((project_id, status, m), 0))
+                            for m in chart_months]
 
                 check_series[project_id] = {
-                    'labels': chk_labels,
-                    'incoming_portfolio': in_port,
-                    'incoming_cleared': in_clear,
-                    'outgoing_given': out_given,
-                    'outgoing_paid': out_paid
+                    'labels': labels,
+                    'incoming_portfolio': check_line(chart_in_checks, 'portfoyde'),
+                    'incoming_cleared': check_line(chart_in_checks, 'tahsil_edildi'),
+                    'outgoing_given': check_line(chart_out_checks, 'verildi'),
+                    'outgoing_paid': check_line(chart_out_checks, 'odendi')
                 }
 
                 # --- Bu ay kutuları ---
@@ -4190,31 +4201,33 @@ def monthly_payments_api():
     """Son 12 ayın aylık toplam ödemelerini JSON formatında döndürür."""
     conn = get_connection()
     cur = conn.cursor()
+    try:
 
-    # Son 12 ayın verisini çekmek için veritabanına özel bir sorgu gönder
-    # Bu sorgu, her ayın başlangıcını ve o aydaki toplam ödemeyi hesaplar.
-    # `DATE_TRUNC('month', ...)` fonksiyonu tarihi ayın ilk gününe yuvarlar
-    # Only cash and cleared checks are real money. A check in the portfolio
-    # or a bounced one must not appear as collected income on the chart.
-    cur.execute("""
-        SELECT 
-            DATE_TRUNC('month', p.payment_date)::DATE AS month, 
-            SUM(p.amount) AS total_amount
-        FROM 
-            payments p
-            LEFT JOIN checks c ON p.check_id = c.id
-        WHERE 
-            p.payment_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
-            AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
-        GROUP BY 
-            month
-        ORDER BY 
-            month;
-    """)
+        # Son 12 ayın verisini çekmek için veritabanına özel bir sorgu gönder
+        # Bu sorgu, her ayın başlangıcını ve o aydaki toplam ödemeyi hesaplar.
+        # `DATE_TRUNC('month', ...)` fonksiyonu tarihi ayın ilk gününe yuvarlar
+        # Only cash and cleared checks are real money. A check in the portfolio
+        # or a bounced one must not appear as collected income on the chart.
+        cur.execute("""
+            SELECT 
+                DATE_TRUNC('month', p.payment_date)::DATE AS month, 
+                SUM(p.amount) AS total_amount
+            FROM 
+                payments p
+                LEFT JOIN checks c ON p.check_id = c.id
+            WHERE 
+                p.payment_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+                AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
+            GROUP BY 
+                month
+            ORDER BY 
+                month;
+        """)
     
-    results = cur.fetchall()
-    cur.close()
-    conn.close()
+        results = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
 
     # Veritabanından gelen veriyi grafiğin beklediği formata dönüştür
     labels = []
