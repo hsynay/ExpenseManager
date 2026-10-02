@@ -7,7 +7,7 @@
     <div class="col-lg-8">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2 class="fw-bold"><i class="fa-solid fa-edit me-2 text-warning"></i>Gider Ödemesini Düzenle</h2>
-            <a href="{{ url_for('list_expenses', project_id=payment.project_id) }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Gider Listesine Dön</a>
+            <a href="{{ next_url or url_for('list_expenses', project_id=payment.project_id) }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Gider Listesine Dön</a>
         </div>
 
         <div class="card">
@@ -16,6 +16,8 @@
             </div>
             <div class="card-body p-4">
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="next" value="{{ next_url }}">
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="amount" class="form-label fw-semibold">Ödeme Tutarı (₺) (*)</label>
@@ -23,7 +25,7 @@
                         </div>
                         <div class="col-md-6">
                             <label for="payment_date" class="form-label fw-semibold">İşlem Tarihi (*)</label>
-                            <input type="date" class="form-control" id="payment_date" name="payment_date" value="{{ payment.payment_date.strftime('%Y-%m-%d') }}" required>
+                            <input type="date" min="2000-01-01" max="2100-12-31" class="form-control" id="payment_date" name="payment_date" value="{{ payment.payment_date.strftime('%Y-%m-%d') }}" required>
                         </div>
                     </div>
 
@@ -31,7 +33,7 @@
                     {% if payment.is_check %}
                     <div class="mb-3">
                         <label for="check_due_date" class="form-label fw-semibold">Çek Vade Tarihi (*)</label>
-                        <input type="date" class="form-control" id="check_due_date" name="check_due_date" value="{{ payment.check_due_date.strftime('%Y-%m-%d') if payment.check_due_date else '' }}" required>
+                        <input type="date" min="2000-01-01" max="2100-12-31" class="form-control" id="check_due_date" name="check_due_date" value="{{ payment.check_due_date.strftime('%Y-%m-%d') if payment.check_due_date else '' }}" required>
                     </div>
                     {% endif %}
 
@@ -41,7 +43,7 @@
                     </div>
 
                     <div class="d-grid gap-2 d-md-flex justify-content-md-end">
-                        <a href="{{ url_for('list_expenses', project_id=payment.project_id) }}" class="btn btn-secondary px-4"><i class="fa-solid fa-times me-2"></i>İptal</a>
+                        <a href="{{ next_url or url_for('list_expenses', project_id=payment.project_id) }}" class="btn btn-secondary px-4"><i class="fa-solid fa-times me-2"></i>İptal</a>
                         <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-save me-2"></i>Değişiklikleri Kaydet</button>
                     </div>
                 </form>

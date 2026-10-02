@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 
 {% block title %}Gelir Listesi - KONAK İnşaat{% endblock %}
 
@@ -21,6 +22,9 @@
 <div class="filter-card">
     <h5 class="fw-bold mb-3"><i class="fa-solid fa-filter me-2"></i>Filtreleme Seçenekleri</h5>
     <form class="row g-4" method="get">
+        <div class="col-md-12">
+            <input type="text" name="search" class="form-control" placeholder="Müşteri adı, soyadı veya açıklama ile arayın..." value="{{ request.args.get('search', '') }}">
+        </div>
         <div class="col-md-3">
             <label class="form-label fw-semibold">Proje</label>
             <select name="project" class="form-select">
@@ -41,11 +45,11 @@
         </div>
         <div class="col-md-2">
             <label class="form-label fw-semibold">Başlangıç Tarihi</label>
-            <input type="date" name="start_date" class="form-control" value="{{ start_date or '' }}">
+            <input type="date" min="2000-01-01" max="2100-12-31" name="start_date" class="form-control" value="{{ start_date or '' }}">
         </div>
         <div class="col-md-2">
             <label class="form-label fw-semibold">Bitiş Tarihi</label>
-            <input type="date" name="end_date" class="form-control" value="{{ end_date or '' }}">
+            <input type="date" min="2000-01-01" max="2100-12-31" name="end_date" class="form-control" value="{{ end_date or '' }}">
         </div>
         <div class="col-md-2 d-flex align-items-end">
             <button type="submit" class="btn btn-filter text-white me-2"><i class="fa-solid fa-search me-1"></i>Filtrele</button>
@@ -114,6 +118,8 @@
             </table>
         </div>
         
+        {{ pager(payments_pager) }}
+
         {% if not payments %}
         <div class="text-center py-5">
             <i class="fa-solid fa-inbox fa-3x text-muted mb-3"></i>
