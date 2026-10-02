@@ -19,6 +19,8 @@
         <div class="card">
             <div class="card-body p-4">
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="submission_token" value="{{ submission_token() }}">
                     <div class="mb-3">
                         <label for="supplier_id" class="form-label fw-semibold">Tedarikçi / Taşeron (*)</label>
                         <select class="form-select" id="supplier_id" name="supplier_id" required>
@@ -44,7 +46,7 @@
                         </div>
                         <div class="col-md-6">
                             <label for="payment_date" class="form-label fw-semibold">Ödeme Tarihi (*)</label>
-                            <input type="date" class="form-control" id="payment_date" name="payment_date" required>
+                            <input type="date" min="2000-01-01" max="2100-12-31" class="form-control" id="payment_date" name="payment_date" required>
                         </div>
                     </div>
                     

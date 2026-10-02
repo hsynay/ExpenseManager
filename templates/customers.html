@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 
 {% block title %}Müşteriler Detaylı Yönetim{% endblock %}
 
@@ -171,6 +172,8 @@
         <h5 class="text-muted">Kayıtlı veya aranan kriterde müşteri bulunamadı.</h5>
     </div>
     {% endfor %}
+
+    {{ pager(customers_pager) }}
 </div>
 
 {% endblock %}

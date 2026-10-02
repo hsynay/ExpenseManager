@@ -1,0 +1,7 @@
+# Only needed to run the test suite. The app itself does not import these.
+#
+# Install with:  pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+pytest==9.1.1

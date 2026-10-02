@@ -1,20 +1,149 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify 
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from dateutil.relativedelta import relativedelta
 from calendar import monthrange
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-from db import get_connection
+from db import get_connection, release_request_connections
 from werkzeug.security import generate_password_hash, check_password_hash
-from parser import parse_whatsapp_message
 import os
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from itertools import groupby, zip_longest
 import json
-from datetime import date
-from decimal import Decimal 
-from flask import jsonify
+from decimal import Decimal
+from dotenv import load_dotenv
+from flask_wtf.csrf import CSRFProtect, CSRFError
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
+import uuid
+from functools import wraps
+from urllib.parse import urlsplit, urlunsplit
+import random
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)  
+
+# Read the .env file before we use any environment variable below.
+load_dotenv()
+
+# The secret key signs the session cookie, so it must stay the same after a
+# restart and be shared by all gunicorn workers. A random key here would log
+# users out at random times.
+app.secret_key = os.environ.get('SECRET_KEY')
+if not app.secret_key:
+    raise RuntimeError(
+        "SECRET_KEY is not set. Add it to .env for local development, "
+        "or to the environment variables of the host in production."
+    )
+
+# Session cookie hardening.
+# SESSION_COOKIE_SECURE tells the browser to send the cookie over HTTPS only.
+# It must be true in production, but false for local http development.
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true',
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+)
+
+# CSRF protection for every POST request. Templates must send the token in a
+# hidden "csrf_token" field, or in the "X-CSRFToken" header for fetch() calls.
+csrf = CSRFProtect(app)
+
+# The host runs the app behind a proxy, so request.remote_addr is the address
+# of the proxy, not of the visitor. ProxyFix reads the real client address
+# from the rightmost value of X-Forwarded-For, which only the proxy can set.
+# Without this the rate limit below would count all visitors as one person.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
+# Rate limiting. There is no global limit on purpose: only /login is limited,
+# so normal work is never slowed down. Counters live in memory, which is fine
+# because the app is kept awake and we do not want to run Redis.
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    storage_uri='memory://',
+)
+
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    """Show a clear message instead of a raw 400 page.
+
+    This usually happens when the session expired and the page was left open
+    for a long time.
+    """
+    app.logger.warning('CSRF validation failed: %s', e.description)
+    # fetch() calls expect JSON, not a redirect.
+    if request.is_json or request.accept_mimetypes.best == 'application/json':
+        return jsonify({'error': 'csrf_failed'}), 400
+    flash('Güvenlik doğrulaması başarısız oldu. Oturumunuz zaman aşımına '
+          'uğramış olabilir, lütfen sayfayı yenileyip tekrar deneyin.', 'danger')
+    # Do not redirect to request.referrer: that header is attacker controlled
+    # and would create an open redirect.
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
+
+
+@app.errorhandler(429)
+def handle_rate_limit(e):
+    """Too many failed login attempts from the same address.
+
+    WARNING: login.html is hardcoded here. This is correct only while /login
+    is the single route with a rate limit. If you add a limit to any other
+    route, this handler must choose the page by request.endpoint, otherwise
+    the user gets the login page after, say, a blocked report request.
+    """
+    app.logger.warning('Rate limit reached on %s from %s',
+                       request.path, get_remote_address())
+    flash('Çok fazla başarısız giriş denemesi yapıldı. Güvenlik nedeniyle '
+          'bir süre beklemeniz gerekiyor. Lütfen 1 dakika sonra tekrar '
+          'deneyin.', 'danger')
+    return render_template('login.html'), 429
+
+
+class ValidationError(ValueError):
+    """An input problem with a message that is safe to show to the user.
+
+    We raise this from our own checks, so the text is written for people and
+    contains no technical detail. Every other exception may carry database or
+    code internals, so it goes to the log and the user gets a short message
+    that only says which operation failed.
+
+    It extends ValueError to keep the old behaviour of any code that already
+    catches ValueError.
+    """
+
+
+# Dates typed in the browser can carry a five digit year, because the date
+# input has no upper bound of its own. Postgres stores such a year happily,
+# but psycopg2 cannot read it back into a Python date (the limit is 9999) and
+# every page that touches the row then fails. So every date coming from a form
+# must pass through here before it reaches SQL.
+MIN_FORM_YEAR = 2000
+MAX_FORM_YEAR = 2100
+
+
+def parse_form_date(value, label, required=True):
+    """Turn a form date string into a date, or raise ValidationError.
+
+    `label` names the field in the message the user sees.
+    Returns None when the field is empty and not required.
+    """
+    value = (value or "").strip()
+    if not value:
+        if required:
+            raise ValidationError("%s alanı zorunludur." % label)
+        return None
+    try:
+        parsed = datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError:
+        raise ValidationError(
+            "%s geçerli bir tarih değil. Lütfen gün/ay/yıl alanlarını "
+            "kontrol edin." % label)
+    if not (MIN_FORM_YEAR <= parsed.year <= MAX_FORM_YEAR):
+        raise ValidationError(
+            "%s için yıl %d ile %d arasında olmalı. Girilen yıl: %d."
+            % (label, MIN_FORM_YEAR, MAX_FORM_YEAR, parsed.year))
+    return parsed
 
 
 # Jinja filter: format numbers like Turkish style (e.g. 2600000 -> 2.600.000)
@@ -75,20 +204,211 @@ def log_audit(cur, user_id, action, entity_type, entity_id=None, details=None):
     )
 
 
+# --- Double submit protection -------------------------------------------
+# A form that creates a new record carries a one time token. The token is
+# stored only after it is used, and always inside the same transaction as the
+# record itself, so the token survives exactly when the record does.
+
+# How long a used token is kept. It must be longer than the session lifetime
+# (12 hours): a form older than the session cannot be submitted anyway,
+# because its CSRF check fails first.
+SUBMISSION_TOKEN_RETENTION = '48 hours'
+
+# Chance of cleaning old tokens after a successful claim. Cleaning on every
+# request would be wasted work, and a cron job would be one more moving part.
+SUBMISSION_TOKEN_CLEANUP_CHANCE = 0.02
+
+
+def submission_token():
+    """Give a fresh token to a form. Called from templates."""
+    return str(uuid.uuid4())
+
+
+app.jinja_env.globals['submission_token'] = submission_token
+
+
+def claim_submission_token(cur, token, endpoint):
+    """Try to use a form token once. Return True the first time it is seen.
+
+    Runs on the caller's cursor on purpose: the token is written in the same
+    transaction as the record being created, so a failed save also releases
+    the token and the user can try again.
+
+    ON CONFLICT keeps the transaction usable when the token was already used.
+    It also makes two requests that arrive together safe: the second insert
+    waits for the first transaction to finish, then sees the conflict.
+    """
+    try:
+        token = str(uuid.UUID(str(token)))
+    except (ValueError, AttributeError, TypeError):
+        # A page from the cache, or a form we have not updated yet. Never
+        # block a real save because the token is missing or malformed.
+        app.logger.warning('Submission token missing or invalid on %s', endpoint)
+        return True
+
+    cur.execute(
+        """
+        INSERT INTO submission_tokens (token, endpoint) VALUES (%s, %s)
+        ON CONFLICT DO NOTHING
+        RETURNING token
+        """,
+        (token, endpoint)
+    )
+    if cur.fetchone() is None:
+        app.logger.info('Duplicate submission blocked on %s', endpoint)
+        return False
+
+    if random.random() < SUBMISSION_TOKEN_CLEANUP_CHANCE:
+        cur.execute(
+            "DELETE FROM submission_tokens WHERE used_at < now() - %s::interval",
+            (SUBMISSION_TOKEN_RETENTION,)
+        )
+    return True
+
+
+@app.teardown_appcontext
+def return_db_connections(exc):
+    """Put back any pooled connection this request did not close itself."""
+    release_request_connections(exc)
+
+
 def get_user_by_email(email):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, email, password_hash, full_name FROM users WHERE email = %s", (email,))
-    user = cur.fetchone()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("SELECT id, email, password_hash, full_name FROM users WHERE email = %s", (email,))
+        user = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
     return user 
+
+
+PAGE_SIZE = 50
+
+
+def get_page_number(arg_name='page'):
+    """Read a page number out of the query string.
+
+    Anything missing, negative or not a number means page 1, so a hand edited
+    address can never produce an error page.
+    """
+    try:
+        page = int(request.args.get(arg_name, 1))
+    except (TypeError, ValueError):
+        return 1
+    return page if page >= 1 else 1
+
+
+def page_window(page):
+    """(limit, offset) for a page.
+
+    The limit asks for one row more than a page holds. If that extra row comes
+    back there is a next page, which saves a second COUNT query on every list.
+    """
+    return PAGE_SIZE + 1, (page - 1) * PAGE_SIZE
+
+
+def build_pager(page, has_next, arg_name='page'):
+    """The previous and next links for one list.
+
+    Every other query parameter is carried over, so paging keeps the filters
+    and the sort order the user picked.
+    """
+    args = request.args.to_dict(flat=True)
+
+    def link(target_page):
+        merged = dict(args)
+        merged[arg_name] = target_page
+        return url_for(request.endpoint, **merged)
+
+    return {
+        'page': page,
+        'has_prev': page > 1,
+        'has_next': has_next,
+        'prev_url': link(page - 1) if page > 1 else None,
+        'next_url': link(page + 1) if has_next else None,
+    }
+
+
+def split_page(rows, page, arg_name='page'):
+    """Drop the extra row page_window asked for and build the links."""
+    has_next = len(rows) > PAGE_SIZE
+    return rows[:PAGE_SIZE], build_pager(page, has_next, arg_name)
+
+
+def safe_next(value):
+    """Return a 'next' address only when it points into this site.
+
+    'next' comes from the address bar or a form field, so anyone can put
+    https://another-site in it, and redirecting there after a save would hand
+    the user to a stranger. A path starting with a single slash is followed.
+    A full address is followed only when it names this host (the referrer
+    header looks like that), and then only its path part is kept. Anything
+    else returns None and the caller falls back to its own default page.
+    """
+    if not value:
+        return None
+    value = value.strip()
+    parts = urlsplit(value)
+    if parts.scheme or parts.netloc:
+        if parts.scheme not in ('http', 'https') or parts.netloc != request.host:
+            return None
+        value = urlunsplit(('', '', parts.path or '/', parts.query,
+                            parts.fragment))
+    if not value.startswith('/') or value.startswith('//') \
+            or value.startswith('/\\'):
+        return None
+    return value
+
+
+def login_required(view):
+    """Send anyone without a session to the login page.
+
+    Goes under @app.route, so the route registers this wrapper. wraps keeps
+    the original function name, which Flask uses as the endpoint name, so
+    every url_for call keeps working.
+    """
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return view(*args, **kwargs)
+    return wrapper
+
+
+def json_login_required(payload):
+    """Answer 401 with a JSON body instead of redirecting.
+
+    For the endpoints the browser calls from JavaScript: a redirect to the
+    login page would arrive as HTML where the caller expects JSON. The body
+    is passed in because the existing endpoints do not all use the same one.
+    """
+    def decorator(view):
+        @wraps(view)
+        def wrapper(*args, **kwargs):
+            if 'user_id' not in session:
+                return jsonify(payload), 401
+            return view(*args, **kwargs)
+        return wrapper
+    return decorator
+
 
 @app.route("/ping")
 def ping():
     return jsonify({"status": "ok"}), 200
 
 @app.route('/login', methods=['GET', 'POST'])
+# Slow down automated password guessing without blocking real people: two
+# users share one account from the same office, so the limit is generous.
+# Only POST is limited, and deduct_when counts the attempt only when the page
+# is rendered again (status 200 = wrong password). A successful login answers
+# with a redirect (302) and is never counted.
+@limiter.limit(
+    '10 per minute',
+    methods=['POST'],
+    deduct_when=lambda response: response.status_code == 200,
+)
 def login():
     if request.method == 'POST':
         email = request.form['email']
@@ -97,6 +417,10 @@ def login():
         if user and check_password_hash(user[2], password):
             session['user_id'] = user[0]
             session['user_name'] = user[3]
+            # Needed for PERMANENT_SESSION_LIFETIME to apply. Flask refreshes
+            # the cookie on each request, so the session ends 12 hours after
+            # the last activity.
+            session.permanent = True
             return redirect(url_for('dashboard'))
         else:
             flash('E-posta veya şifre hatalı.', 'danger')
@@ -108,10 +432,8 @@ def logout():
     return redirect(url_for('login'))
 
 @app.route('/project/new', methods=['GET', 'POST'])
+@login_required
 def new_project():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     if request.method == 'POST':
         name = request.form['name']
         address = request.form['address']
@@ -121,39 +443,53 @@ def new_project():
 
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO projects (name, address, project_type, total_floors, total_flats)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id
-        """, (name, address, project_type, floors, flats))
-        project_id = cur.fetchone()[0]  # Proje ID'yi al
-        log_audit(cur, session.get('user_id'), 'project_create', 'project', project_id,
-                  {'name': name, 'type': project_type, 'floors': floors, 'flats': flats})
-        conn.commit()
-        cur.close()
-        conn.close()
+        try:
 
-        flash('Proje başarıyla eklendi. Şimdi daireleri tanımlayabilirsiniz.', 'success')
-        return redirect(url_for('manage_flats', project_id=project_id)) # YENİ YÖNLENDİRME
+            # Double submit guard, in the same transaction as the insert below.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'new_project'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(url_for('dashboard'))
+
+            cur.execute("""
+                INSERT INTO projects (name, address, project_type, total_floors, total_flats)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+            """, (name, address, project_type, floors, flats))
+            project_id = cur.fetchone()[0]  # Proje ID'yi al
+            log_audit(cur, session.get('user_id'), 'project_create', 'project', project_id,
+                      {'name': name, 'type': project_type, 'floors': floors, 'flats': flats})
+            conn.commit()
+
+            flash('Proje başarıyla eklendi. Şimdi daireleri tanımlayabilirsiniz.', 'success')
+            return redirect(url_for('manage_flats', project_id=project_id)) # YENİ YÖNLENDİRME
+        finally:
+            cur.close()
+            conn.close()
 
     return render_template('project_new.html')
 
 
 
 @app.route('/project/<int:project_id>/manage_flats', methods=['GET', 'POST'])
+@login_required
 def manage_flats(project_id):
     """
     Bir projedeki daireleri akıllıca yönetir (ekler, günceller, sahibi olmayanları siler).
     Mevcut ve satılmış daireleri korur.
     """
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
     if request.method == 'POST':
         try:
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot create the flats twice.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'manage_flats'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(url_for('manage_flats', project_id=project_id))
+
             # Formdan gelen tüm daire verilerini listeler halinde al
             flat_ids = request.form.getlist('flat_id[]')
             block_names = request.form.getlist('block_name[]')
@@ -197,9 +533,11 @@ def manage_flats(project_id):
             flash('Daire listesi başarıyla güncellendi.', 'success')
             return redirect(url_for('assign_flat_owner'))
 
-        except Exception as e:
+        except Exception:
             conn.rollback()
-            flash(f'Daireler güncellenirken bir hata oluştu: {e}', 'danger')
+            app.logger.exception('Failed to update flats of project %s', project_id)
+            flash('Daireler güncellenirken bir hata oluştu. Değişiklikler '
+                  'kaydedilmedi.', 'danger')
         finally:
             cur.close()
             conn.close()
@@ -214,8 +552,10 @@ def manage_flats(project_id):
         cur.execute("SELECT id, block_name, flat_no, floor, room_type, owner_id FROM flats WHERE project_id = %s ORDER BY block_name, floor, flat_no", (project_id,))
         existing_flats = cur.fetchall()
         
-    except Exception as e:
-        flash(f'Veri alınırken bir hata oluştu: {e}', 'danger')
+    except Exception:
+        app.logger.exception('Failed to load flats page of project %s', project_id)
+        flash('Daire bilgileri alınırken bir hata oluştu. Liste eksik olabilir.',
+              'danger')
         project_name = "Bilinmeyen Proje"
         existing_flats = []
     finally:
@@ -229,11 +569,37 @@ def manage_flats(project_id):
 
 
 
-@app.route('/expenses', methods=['GET'])
-def list_expenses():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
+def repair_out_of_range_dates(conn, cur, columns, page):
+    """Reset dates whose year is far in the future, and log it if it happens.
 
+    Postgres accepts a five digit year, but psycopg2 cannot read it back into
+    a Python date, so one such row makes every page that reads it fail. This
+    is a safety net, not the fix: forms now validate dates through
+    parse_form_date, so nothing should reach the database in this state.
+
+    When this net stays silent for a while, it can be removed. If a warning
+    shows up in the log, some input path is still missing validation and the
+    table name below says where to look.
+    """
+    try:
+        for table, column in columns:
+            cur.execute(
+                "UPDATE {t} SET {c} = CURRENT_DATE "
+                "WHERE EXTRACT(YEAR FROM {c}) > 3000".format(t=table, c=column))
+            if cur.rowcount:
+                app.logger.warning(
+                    'Out of range dates repaired on %s: %s rows in %s.%s '
+                    '(an input path is still missing date validation)',
+                    page, cur.rowcount, table, column)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        app.logger.exception('Date repair failed on %s', page)
+
+
+@app.route('/expenses', methods=['GET'])
+@login_required
+def list_expenses():
     conn = get_connection()
     cur = conn.cursor()
 
@@ -262,6 +628,20 @@ def list_expenses():
                                selected_project_id=None,
                                user_name=session.get('user_name'))
 
+    # Validate the project id before any query. If it is broken we cannot
+    # render the detailed view, so we go back to the project picker.
+    try:
+        project_id = int(project_id_str)
+    except (TypeError, ValueError):
+        cur.close()
+        conn.close()
+        flash("Geçersiz proje seçimi.", "danger")
+        return render_template('expenses.html',
+                               detailed_view=False,
+                               all_projects=all_projects,
+                               selected_project_id=None,
+                               user_name=session.get('user_name'))
+
     expenses_data, petty_cash_items = [], []
     project_name = ""
     total_project_expense, total_paid_project, total_remaining_due = Decimal(0), Decimal(0), Decimal(0)
@@ -269,20 +649,19 @@ def list_expenses():
     supplier_list = []
     large_titles, petty_titles = [], []
 
-    try:
-        project_id = int(project_id_str)
+    # The two lists on this page turn independently.
+    page = get_page_number()
+    pc_page = get_page_number('pc_page')
+    expenses_pager = build_pager(page, has_next=False)
+    petty_pager = build_pager(pc_page, has_next=False, arg_name='pc_page')
 
-        # --- KRİTİK HATA ÇÖZÜMÜ: 42026 gibi yanlış yılları otomatik düzeltip çöküşü önler ---
-        try:
-            cur.execute("""
-                UPDATE petty_cash_expenses SET expense_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM expense_date) > 3000;
-                UPDATE expense_schedule SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
-                UPDATE expenses SET expense_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM expense_date) > 3000;
-            """)
-            conn.commit()
-        except Exception:
-            conn.rollback()
-        # ------------------------------------------------------------------------------------
+    try:
+        # Safety net for out of range dates. See repair_out_of_range_dates.
+        repair_out_of_range_dates(conn, cur, [
+            ('petty_cash_expenses', 'expense_date'),
+            ('expense_schedule', 'due_date'),
+            ('expenses', 'expense_date'),
+        ], '/expenses')
 
         cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
         project_name = cur.fetchone()[0]
@@ -337,8 +716,11 @@ def list_expenses():
                 expenses_sql += " AND e.title ILIKE %s"
                 expenses_params.append(f"%{title_filter}%")
             expenses_sql += " ORDER BY e.id DESC"
+            large_limit, large_offset = page_window(page)
+            expenses_sql += " LIMIT %s OFFSET %s"
+            expenses_params.extend([large_limit, large_offset])
             cur.execute(expenses_sql, tuple(expenses_params))
-            expenses_raw = cur.fetchall()
+            expenses_raw, expenses_pager = split_page(cur.fetchall(), page)
 
         # Küçük giderler
         if expense_type in ('all', 'petty'):
@@ -358,13 +740,22 @@ def list_expenses():
             # Python ile kesin sıralama
             is_reverse = (pc_order == 'desc')
             if pc_sort == 'amount':
-                petty_cash_items = sorted(raw_petty, key=lambda x: (x[2], x[3], x[0]), reverse=is_reverse)
+                petty_sorted = sorted(raw_petty, key=lambda x: (x[2], x[3], x[0]), reverse=is_reverse)
             else:
-                petty_cash_items = sorted(raw_petty, key=lambda x: (x[3], x[0]), reverse=is_reverse)
+                petty_sorted = sorted(raw_petty, key=lambda x: (x[3], x[0]), reverse=is_reverse)
+
+            # The total belongs to the whole list, so read it before cutting
+            # the page out. Sorting happens here rather than in SQL, so the
+            # page is cut here too.
+            total_petty_cash_expense = sum(item[2] for item in petty_sorted)
+            start = (pc_page - 1) * PAGE_SIZE
+            petty_cash_items = petty_sorted[start:start + PAGE_SIZE]
+            petty_pager = build_pager(
+                pc_page, has_next=len(petty_sorted) > start + PAGE_SIZE,
+                arg_name='pc_page')
         else:
             petty_cash_items = []
-
-        total_petty_cash_expense = sum(item[2] for item in petty_cash_items)
+            total_petty_cash_expense = Decimal(0)
 
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s", (project_id,))
         total_planned_expense = cur.fetchone()[0]
@@ -405,8 +796,11 @@ def list_expenses():
             expense_dict['installments'].sort(key=lambda x: x['due_date'])
             expenses_data.append(expense_dict)
             
-    except Exception as e:
-        flash(f"Giderler listelenirken bir hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to list expenses (project_id=%s)',
+                             project_id_str)
+        flash("Giderler listelenirken bir hata oluştu. Liste eksik olabilir.",
+              "danger")
     finally:
         cur.close()
         conn.close()
@@ -429,6 +823,8 @@ def list_expenses():
                            current_query=current_query,
                            pc_sort=pc_sort,            
                            pc_order=pc_order,
+                           expenses_pager=expenses_pager,
+                           petty_pager=petty_pager,
                            user_name=session.get('user_name'))
 
 
@@ -439,82 +835,60 @@ def select_project_for_expenses():
 
 # app.py içine eklenecek/değiştirilecek fonksiyonlar
 
-# YARDIMCI FONKSİYON: Gider ödemelerini taksitlerle eşleştirir.
-def reconcile_expense_payments(cur, expense_id):
-    """
-    Bir gidere ait tüm taksitlerin ödenen tutarlarını,
-    sadece GEÇERLİ ödemelere (nakit veya durumu 'karşılıksız' olmayan çekler)
-    göre baştan hesaplar.
-    """
-    # 1. Gider için yapılan GEÇERLİ ödemelerin toplamını al
-    cur.execute("""
-        SELECT COALESCE(SUM(sp.amount), 0)
-        FROM supplier_payments sp
-        LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
-        WHERE sp.expense_id = %s AND (sp.payment_method = 'nakit' OR oc.status != 'karsiliksiz')
-    """, (expense_id,))
-    total_valid_paid = cur.fetchone()[0]
-
-    # 2. İlgili giderin tüm taksitlerini sıfırla
-    cur.execute("UPDATE expense_schedule SET paid_amount = 0, is_paid = FALSE WHERE expense_id = %s", (expense_id,))
-    
-    # 3. Hesaplanan doğru tutarı taksitlere baştan dağıt
-    amount_to_distribute = total_valid_paid
-    cur.execute("SELECT id, amount FROM expense_schedule WHERE expense_id = %s ORDER BY due_date ASC", (expense_id,))
-    installments = cur.fetchall()
-    for inst_id, total_amount in installments:
-        if amount_to_distribute <= 0: break
-        payment_for_this_inst = min(amount_to_distribute, total_amount)
-        is_paid = (payment_for_this_inst >= total_amount)
-        cur.execute("UPDATE expense_schedule SET paid_amount = %s, is_paid = %s WHERE id = %s", (payment_for_this_inst, is_paid, inst_id))
-        amount_to_distribute -= payment_for_this_inst
 
 @app.route('/supplier_payment/<int:payment_id>/edit', methods=['GET', 'POST'])
+@login_required
 def edit_supplier_payment(payment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
     conn = get_connection()
     cur = conn.cursor()
+    next_url = safe_next(request.form.get('next') or request.args.get('next'))
     
     # --- FORM GÖNDERİLDİĞİNDE (POST İSTEĞİ) ---
     if request.method == 'POST':
         try:
             amount_str = request.form.get('amount').replace('.', '').replace(',', '.')
             amount = Decimal(amount_str)
-            payment_date = request.form.get('payment_date')
+            payment_date = parse_form_date(request.form.get('payment_date'),
+                                           "Ödeme tarihi")
             description = request.form.get('description')
             
             cur.execute("SELECT expense_id, check_id FROM supplier_payments WHERE id = %s", (payment_id,))
             result = cur.fetchone()
             if not result:
-                raise ValueError("Güncellenecek ödeme kaydı bulunamadı.")
+                raise ValidationError("Güncellenecek ödeme kaydı bulunamadı.")
             expense_id, check_id = result
 
             cur.execute("UPDATE supplier_payments SET amount=%s, payment_date=%s, description=%s WHERE id=%s",
                         (amount, payment_date, description, payment_id))
 
             if check_id:
-                check_due_date = request.form.get('check_due_date')
+                check_due_date = parse_form_date(
+                    request.form.get('check_due_date'), "Çek vade tarihi")
                 cur.execute("UPDATE outgoing_checks SET amount = %s, issue_date = %s, due_date = %s WHERE id = %s",
                             (amount, payment_date, check_due_date, check_id))
 
-            reconcile_expense_payments(cur, expense_id)
+            reconcile_supplier_payments(cur, expense_id)
             
             conn.commit()
             flash('Gider ödemesi başarıyla güncellendi.', 'success')
             
             cur.execute("SELECT project_id FROM expenses WHERE id = %s", (expense_id,))
             project_id = cur.fetchone()[0]
-            return redirect(url_for('list_expenses', project_id=project_id))
+            return redirect(next_url or url_for('list_expenses', project_id=project_id))
 
-        except Exception as e:
+        except ValidationError as e:
             conn.rollback()
-            flash(f'Güncelleme sırasında hata: {e}', 'danger')
+            flash(str(e), 'danger')
+        except Exception:
+            conn.rollback()
+            app.logger.exception('Failed to update supplier payment %s', payment_id)
+            flash('Tedarikçi ödemesi güncellenirken bir hata oluştu. '
+                  'Değişiklikler kaydedilmedi.', 'danger')
         finally:
             cur.close()
             conn.close()
-        return redirect(url_for('edit_supplier_payment', payment_id=payment_id))
+        return redirect(url_for('edit_supplier_payment', payment_id=payment_id,
+                                next=next_url or None))
 
     # --- SAYFA İLK AÇILDIĞINDA (GET İSTEĞİ) ---
     # DÜZELTME BURADA: Veritabanından gelen 'tuple' verisini bir 'dictionary' (sözlük) haline getiriyoruz.
@@ -547,53 +921,62 @@ def edit_supplier_payment(payment_id):
             'check_due_date': payment_raw[7]
         }
 
-    except Exception as e:
-        flash(f'Ödeme bilgileri alınırken hata oluştu: {e}', 'danger')
+    except Exception:
+        app.logger.exception('Failed to load supplier payment %s', payment_id)
+        flash('Tedarikçi ödemesi bilgileri alınırken bir hata oluştu.', 'danger')
         return redirect(url_for('dashboard'))
     finally:
         cur.close()
         conn.close()
 
-    return render_template('edit_supplier_payment.html', payment=payment, payment_id=payment_id, user_name=session.get('user_name'))
+    return render_template('edit_supplier_payment.html', payment=payment, payment_id=payment_id,
+                           next_url=next_url or '', user_name=session.get('user_name'))
 
 @app.route('/supplier_payment/<int:payment_id>/delete', methods=['POST'])
+@login_required
 def delete_supplier_payment(payment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
     conn = get_connection()
     cur = conn.cursor()
     try:
         cur.execute("SELECT expense_id FROM supplier_payments WHERE id = %s", (payment_id,))
         expense_id = cur.fetchone()[0]
         cur.execute("DELETE FROM supplier_payments WHERE id = %s", (payment_id,))
-        reconcile_expense_payments(cur, expense_id)
+        reconcile_supplier_payments(cur, expense_id)
         log_audit(cur, session.get('user_id'), 'supplier_payment_delete', 'supplier_payment', payment_id,
                   {'expense_id': expense_id})
         conn.commit()
         flash('Gider ödemesi silindi ve ilgili taksitler güncellendi.', 'success')
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f'Ödeme silinirken hata oluştu: {e}', 'danger')
+        app.logger.exception('Failed to delete supplier payment %s', payment_id)
+        flash('Tedarikçi ödemesi silinirken bir hata oluştu. Ödeme silinmedi.',
+              'danger')
     finally:
         cur.close()
         conn.close()
     project_id = request.form.get('project_id')
-    return redirect(url_for('list_expenses', project_id=project_id))
+    next_url = safe_next(request.form.get('next'))
+    return redirect(next_url or url_for('list_expenses', project_id=project_id))
 
 
 # new_supplier_payment fonksiyonu
 
 @app.route('/supplier_payment/new', methods=['GET', 'POST'])
+@login_required
 def new_supplier_payment():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
     if request.method == 'POST':
         try:
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot record the payment twice.
+            # project_id is read from the form because it is not parsed yet.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'new_supplier_payment'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(url_for('list_expenses', project_id=request.form.get('project_id')))
+
             supplier_id = int(request.form.get('supplier_id'))
             payment_amount = Decimal(request.form.get('amount'))
             payment_date_str = request.form.get('payment_date')
@@ -601,7 +984,7 @@ def new_supplier_payment():
             description = request.form.get('description', 'Tedarikçi Ödemesi')
 
             if not all([supplier_id, payment_amount, payment_date_str, project_id]):
-                raise ValueError("Tüm zorunlu alanlar doldurulmalıdır.")
+                raise ValidationError("Tüm zorunlu alanlar doldurulmalıdır.")
 
             payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d').date()
 
@@ -651,9 +1034,15 @@ def new_supplier_payment():
             flash(f'{format_thousands(payment_amount)} ₺ tutarındaki tedarikçi ödemesi kaydedildi ve borçlara yansıtıldı.', 'success')
             return redirect(url_for('list_expenses', project_id=project_id))
 
-        except Exception as e:
+        except ValidationError as e:
             if conn: conn.rollback()
-            flash(f'Gider ödemesi kaydedilirken bir hata oluştu: {e}', 'danger')
+            flash(str(e), 'danger')
+            return redirect(url_for('new_supplier_payment'))
+        except Exception:
+            if conn: conn.rollback()
+            app.logger.exception('Failed to save supplier payment')
+            flash('Tedarikçi ödemesi kaydedilirken bir hata oluştu. Ödeme '
+                  'kaydedilmedi.', 'danger')
             return redirect(url_for('new_supplier_payment'))
         finally:
             if conn:
@@ -761,15 +1150,21 @@ def new_supplier_payment():
 #                            user_name=session.get('user_name'))
 
 @app.route('/project/<int:project_id>/expense/new', methods=['GET', 'POST'])
+@login_required
 def add_expense(project_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
     if request.method == 'POST':
         try:
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot create the expense, its
+            # schedule and a new supplier twice.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'add_expense'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(url_for('list_expenses', project_id=project_id))
+
             title = request.form['title']
             description = request.form.get('description', '')
             
@@ -778,7 +1173,7 @@ def add_expense(project_id):
             supplier_id = None
             if supplier_option == 'new':
                 new_supplier_name = request.form.get('new_supplier_name')
-                if not new_supplier_name: raise ValueError("Yeni tedarikçi adı zorunludur.")
+                if not new_supplier_name: raise ValidationError("Yeni tedarikçi adı zorunludur.")
                 cur.execute(
                     "INSERT INTO suppliers (name, project_id, category) VALUES (%s, %s, %s) RETURNING id",
                     (new_supplier_name, project_id, request.form.get('new_supplier_category'))
@@ -786,7 +1181,7 @@ def add_expense(project_id):
                 supplier_id = cur.fetchone()[0]
             else:
                 supplier_id_val = request.form.get('supplier_id')
-                if not supplier_id_val: raise ValueError("Lütfen bir tedarikçi seçin.")
+                if not supplier_id_val: raise ValidationError("Lütfen bir tedarikçi seçin.")
                 supplier_id = int(supplier_id_val)
 
             # --- DÜZELTİLEN KISIM: JSON İLE TAKSİTLERİ ALMA ---
@@ -817,7 +1212,7 @@ def add_expense(project_id):
                         valid_installments.append((due_date, amt))
 
             if not valid_installments:
-                raise ValueError("En az bir taksit/ödeme girişi yapılmalıdır.")
+                raise ValidationError("En az bir taksit/ödeme girişi yapılmalıdır.")
 
             # *** KRİTİK: Taksitleri veri tabanına yazmadan önce KESİNLİKLE kronolojik sıraya sok ***
             valid_installments.sort(key=lambda x: x[0])
@@ -840,9 +1235,14 @@ def add_expense(project_id):
             flash('Yeni gider ve ödeme planı başarıyla tanımlandı.', 'success')
             return redirect(url_for('list_expenses', project_id=project_id))
 
-        except Exception as e:
+        except ValidationError as e:
             conn.rollback()
-            flash(f'Gider eklenirken bir hata oluştu: {e}', 'danger')
+            flash(str(e), 'danger')
+        except Exception:
+            conn.rollback()
+            app.logger.exception('Failed to add expense to project %s', project_id)
+            flash('Gider eklenirken bir hata oluştu. Gider kaydedilmedi.',
+                  'danger')
         finally:
             cur.close()
             conn.close()
@@ -865,16 +1265,23 @@ def add_expense(project_id):
 # pay_expense_installment fonksiyonu
 
 @app.route('/expense_installment/<int:installment_id>/pay', methods=['GET', 'POST'])
+@login_required
 def pay_expense_installment(installment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
     if request.method == 'POST':
         try:
-            next_url = request.form.get('next') or request.args.get('next')
+            next_url = safe_next(request.form.get('next') or request.args.get('next'))
+
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot record the payment and its
+            # outgoing check twice.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'pay_expense_installment'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(next_url or url_for('pay_expense_installment', installment_id=installment_id))
+
             payment_amount = Decimal(request.form.get('amount'))
             payment_date_str = request.form.get('payment_date')
             payment_method = request.form.get('payment_method', 'nakit')
@@ -884,7 +1291,7 @@ def pay_expense_installment(installment_id):
             
             cur.execute("SELECT expense_id, amount, paid_amount FROM expense_schedule WHERE id = %s", (installment_id,))
             inst = cur.fetchone()
-            if not inst: raise ValueError("Ödeme yapılacak taksit bulunamadı.")
+            if not inst: raise ValidationError("Ödeme yapılacak taksit bulunamadı.")
             expense_id, total_due, already_paid = inst
 
             remaining_due = total_due - (already_paid or 0)
@@ -898,7 +1305,7 @@ def pay_expense_installment(installment_id):
             
             if payment_method == 'çek':
                 due_date_str = request.form.get('check_due_date')
-                if not due_date_str: raise ValueError("Çek için vade tarihi zorunludur.")
+                if not due_date_str: raise ValidationError("Çek için vade tarihi zorunludur.")
                 due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()
                 
                 # 1. Çeki kaydet
@@ -929,9 +1336,15 @@ def pay_expense_installment(installment_id):
             conn.commit()
             return redirect(next_url or url_for('list_expenses', project_id=project_id))
 
-        except Exception as e:
+        except ValidationError as e:
             if conn: conn.rollback()
-            flash(f"Ödeme kaydedilirken bir hata oluştu: {e}", "danger")
+            flash(str(e), "danger")
+        except Exception:
+            if conn: conn.rollback()
+            app.logger.exception('Failed to pay expense installment %s',
+                                 installment_id)
+            flash("Taksit ödemesi kaydedilirken bir hata oluştu. Ödeme "
+                  "kaydedilmedi.", "danger")
         finally:
             cur.close()
             conn.close()
@@ -963,15 +1376,21 @@ def pay_expense_installment(installment_id):
 # assign_flat_owner fonksiyonu
 
 @app.route('/assign_flat_owner', methods=['GET', 'POST'])
+@login_required
 def assign_flat_owner():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
     if request.method == 'POST':
         try:
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot create the same customer
+            # twice when the "new customer" option is used.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'assign_flat_owner'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(url_for('assign_flat_owner'))
+
             project_id = int(request.form.get('project_id'))
             flat_id = int(request.form.get('flat_id'))
             customer_option = request.form.get('customer_option')
@@ -1018,9 +1437,16 @@ def assign_flat_owner():
             
             return redirect(url_for('assign_flat_owner'))
 
-        except Exception as e:
+        except ValidationError as e:
             conn.rollback()
-            flash(f'Bir hata oluştu: {e}', 'danger')
+            flash(str(e), 'danger')
+        except Exception:
+            conn.rollback()
+            # flat_id may not exist yet if int() failed, so read the raw form.
+            app.logger.exception('Failed to assign owner to flat %s',
+                                 request.form.get('flat_id'))
+            flash('Daire sahibi atanırken bir hata oluştu. Kayıt yapılmadı, '
+                  'lütfen bilgileri kontrol edip tekrar deneyin.', 'danger')
         finally:
             cur.close()
             conn.close()
@@ -1039,8 +1465,10 @@ def assign_flat_owner():
         flats_data = cur.fetchall()
         cur.execute("SELECT id, first_name, last_name FROM customers ORDER BY first_name, last_name")
         customers = cur.fetchall()
-    except Exception as e:
-        flash(f'Veri çekilirken bir hata oluştu: {e}', 'danger')
+    except Exception:
+        app.logger.exception('Failed to load the assign flat owner page')
+        flash('Sayfa verileri alınırken bir hata oluştu. Listeler eksik olabilir.',
+              'danger')
         projects, flats_data, customers = [], [], []
     finally:
         if not conn.closed:
@@ -1057,15 +1485,14 @@ def assign_flat_owner():
 # app.py içindeki debt_status fonksiyonunu bulun ve güncelleyin
 
 @app.route('/debts')
+@login_required
 def debt_status():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     projects_data = []
     project_filter = request.args.get('project_id', type=int)
     flat_filter = request.args.get('flat_id', type=int)
+    search_query = (request.args.get('search') or '').strip()
     selected_project_name = None
     selected_flat_desc = None
 
@@ -1091,6 +1518,11 @@ def debt_status():
         if flat_filter:
             flats_sql += " AND f.id = %s"
             flats_params.append(flat_filter)
+        if search_query:
+            like = f"%{search_query}%"
+            flats_sql += (" AND (c.first_name ILIKE %s OR c.last_name ILIKE %s"
+                          " OR (c.first_name || ' ' || c.last_name) ILIKE %s)")
+            flats_params.extend([like, like, like])
         flats_sql += " ORDER BY p.name, f.block_name, f.floor, f.flat_no"
         cur.execute(flats_sql, tuple(flats_params))
         owned_flats = cur.fetchall()
@@ -1161,6 +1593,13 @@ def debt_status():
         total_payments_by_flat = dict(cur.fetchall())
 
         # Adım 3.5: Ödeme geçmişini çek (Aynı kalıyor)
+        # Column order, read by index in the template. list_customers builds a
+        # similar list with the first two columns the other way round, so these
+        # two queries must never be copied between each other.
+        #   0 p.id            1 p.flat_id      2 p.payment_date  3 p.description
+        #   4 p.amount        5 p.payment_method
+        #   6 c.status        7 c.bank_name    8 c.check_number   9 c.due_date
+        #  10 p.check_id
         pay_hist_sql = """
             SELECT 
                 p.id, p.flat_id, p.payment_date, p.description, p.amount, p.payment_method,
@@ -1177,8 +1616,8 @@ def debt_status():
             pay_hist_params.append(project_filter)
         pay_hist_sql += " ORDER BY p.flat_id, p.payment_date DESC, p.id DESC"
         cur.execute(pay_hist_sql, tuple(pay_hist_params))
-        all_payments_raw = cur.fetchall()
-        payments_by_flat = {flat_id: list(group) for flat_id, group in groupby(all_payments_raw, key=lambda x: x[1])}
+        payment_rows_id_first = cur.fetchall()
+        payments_by_flat = {flat_id: list(group) for flat_id, group in groupby(payment_rows_id_first, key=lambda x: x[1])}
 
         # Adım 4: Verileri birleştir
         flats_list = []
@@ -1233,9 +1672,10 @@ def debt_status():
                 'total_project_remaining': total_project_remaining
             })
 
-    except Exception as e:
-        flash(f'Borç durumu sayfası yüklenirken bir hata oluştu: {e}', 'danger')
-        print(f"DEBTS PAGE ERROR: {e}")
+    except Exception:
+        app.logger.exception('Failed to build the debt status page')
+        flash('Borç durumu sayfası yüklenirken bir hata oluştu. Liste eksik '
+              'olabilir.', 'danger')
         projects_data = []
         all_projects = []
     finally:
@@ -1252,11 +1692,9 @@ def debt_status():
                            user_name=session.get('user_name'))
 
 @app.route('/project/<int:project_id>/edit', methods=['GET', 'POST'])
+@login_required
 def edit_project(project_id):
     """Mevcut bir projeyi düzenler ve daire sayısı artarsa daire ekleme sayfasına yönlendirir."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -1277,9 +1715,11 @@ def edit_project(project_id):
             flash('Proje başarıyla güncellendi. Şimdi daire bilgilerini gözden geçirebilirsiniz.', 'success')
             return redirect(url_for('manage_flats', project_id=project_id)) # YENİ YÖNLENDİRME
 
-        except Exception as e:
+        except Exception:
             conn.rollback()
-            flash(f'Proje güncellenirken bir hata oluştu: {e}', 'danger')
+            app.logger.exception('Failed to update project %s', project_id)
+            flash('Proje güncellenirken bir hata oluştu. Değişiklikler '
+                  'kaydedilmedi.', 'danger')
             return redirect(url_for('edit_project', project_id=project_id))
         finally:
             cur.close()
@@ -1298,11 +1738,9 @@ def edit_project(project_id):
     return render_template('edit_project.html', project=project, user_name=session.get('user_name'))
 
 @app.route('/project/<int:project_id>/delete', methods=['POST'])
+@login_required
 def delete_project(project_id):
     """Bir projeyi ve ona bağlı tüm verileri (ilişkili tüm çekler dahil) siler."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -1350,9 +1788,11 @@ def delete_project(project_id):
 
         conn.commit()
         flash('Proje ve ilgili tüm veriler (çekler dahil) başarıyla silindi.', 'success')
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f'Proje silinirken bir hata oluştu: {e}', 'danger')
+        app.logger.exception('Failed to delete project %s', project_id)
+        flash('Proje silinirken bir hata oluştu. Proje silinmedi, tüm '
+              'veriler korundu.', 'danger')
     finally:
         cur.close()
         conn.close()
@@ -1360,10 +1800,8 @@ def delete_project(project_id):
     return redirect(url_for('dashboard'))
 
 @app.route('/delete_flat_owner_data', methods=['POST'])
+@json_login_required({'success': False, 'message': 'Yetkisiz erişim'})
 def delete_flat_owner_data():
-    if 'user_id' not in session:
-        return jsonify({'success': False, 'message': 'Yetkisiz erişim'}), 401
-
     data = request.get_json()
     flat_id = data.get('flat_id')
 
@@ -1407,14 +1845,14 @@ def delete_flat_owner_data():
         conn.close()
 
 @app.route('/customers')
+@login_required
 def list_customers():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     
     search_query = request.args.get('search', '').strip()
+    page = get_page_number()
+    customers_pager = build_pager(page, has_next=False)
 
     try:
         # 1. Müşterileri Çek
@@ -1424,9 +1862,13 @@ def list_customers():
             sql_customers += " WHERE first_name ILIKE %s OR last_name ILIKE %s"
             params.extend([f"%{search_query}%", f"%{search_query}%"])
         sql_customers += " ORDER BY first_name, last_name"
-        
+
+        limit, offset = page_window(page)
+        sql_customers += " LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+
         cur.execute(sql_customers, params)
-        customers_raw = cur.fetchall()
+        customers_raw, customers_pager = split_page(cur.fetchall(), page)
 
         # 2. Daireleri ve Proje Bilgilerini Çek
         cur.execute("""
@@ -1450,6 +1892,13 @@ def list_customers():
         total_paid_dict = dict(cur.fetchall())
 
         # 3.5. TÜM ÖDEME GEÇMİŞİNİ ÇEK (Yeni Eklendi)
+        # Column order, read by index in the template. debt_status builds a
+        # similar list with the first two columns the other way round and one
+        # extra column, so these two queries must never be copied between each
+        # other.
+        #   0 p.flat_id       1 p.id           2 p.payment_date  3 p.description
+        #   4 p.amount        5 p.payment_method
+        #   6 c.status        7 c.bank_name    8 c.check_number   9 c.due_date
         cur.execute("""
             SELECT 
                 p.flat_id, p.id, p.payment_date, p.description, p.amount, p.payment_method,
@@ -1458,9 +1907,8 @@ def list_customers():
             LEFT JOIN checks c ON p.check_id = c.id
             ORDER BY p.flat_id, p.payment_date DESC
         """)
-        from itertools import groupby
-        all_payments_raw = cur.fetchall()
-        payments_history_dict = {k: list(v) for k, v in groupby(all_payments_raw, key=lambda x: x[0])}
+        payment_rows_flat_first = cur.fetchall()
+        payments_history_dict = {k: list(v) for k, v in groupby(payment_rows_flat_first, key=lambda x: x[0])}
 
         # 4. Taksit Planlarını Çek
         cur.execute("""
@@ -1519,20 +1967,22 @@ def list_customers():
                 'flats': customer_flats
             })
 
-    except Exception as e:
-        flash(f"Müşteriler yüklenirken hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to list customers')
+        flash("Müşteriler yüklenirken bir hata oluştu. Liste eksik olabilir.",
+              "danger")
         customers_data = []
     finally:
         cur.close()
         conn.close()
 
-    return render_template('customers.html', customers_data=customers_data, user_name=session.get('user_name'))
+    return render_template('customers.html', customers_data=customers_data,
+                           customers_pager=customers_pager,
+                           user_name=session.get('user_name'))
 
 @app.route('/checks')
+@login_required
 def list_checks():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     
@@ -1547,6 +1997,12 @@ def list_checks():
     # Hata durumunda boş dönmeleri için burada tanımlıyoruz
     incoming_checks, outgoing_checks = [], []
     incoming_parties, outgoing_parties = [], []
+
+    # The two lists page independently, so they need a parameter each.
+    in_page = get_page_number('in_page')
+    out_page = get_page_number('out_page')
+    incoming_pager = build_pager(in_page, has_next=False, arg_name='in_page')
+    outgoing_pager = build_pager(out_page, has_next=False, arg_name='out_page')
     
     in_due_from = request.args.get('in_due_from')
     in_due_to = request.args.get('in_due_to')
@@ -1598,8 +2054,12 @@ def list_checks():
             in_sql += " AND c.status = %s"
             in_params.append(in_status)
         in_sql += " ORDER BY c.due_date ASC"
+        in_limit, in_offset = page_window(in_page)
+        in_sql += " LIMIT %s OFFSET %s"
+        in_params.extend([in_limit, in_offset])
         cur.execute(in_sql, tuple(in_params))
-        incoming_checks = cur.fetchall()
+        incoming_checks, incoming_pager = split_page(cur.fetchall(), in_page,
+                                                     'in_page')
 
         # Verilen Çekleri Çek (Tedarikçilere)
         cur.execute("""
@@ -1640,11 +2100,17 @@ def list_checks():
             out_sql += " AND oc.status = %s"
             out_params.append(out_status)
         out_sql += " ORDER BY oc.due_date ASC"
+        out_limit, out_offset = page_window(out_page)
+        out_sql += " LIMIT %s OFFSET %s"
+        out_params.extend([out_limit, out_offset])
         cur.execute(out_sql, tuple(out_params))
-        outgoing_checks = cur.fetchall()
+        outgoing_checks, outgoing_pager = split_page(cur.fetchall(), out_page,
+                                                     'out_page')
 
-    except Exception as e:
-        flash(f"Çekler listelenirken bir hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to list checks')
+        flash("Çekler listelenirken bir hata oluştu. Liste eksik olabilir.",
+              "danger")
     finally:
         cur.close()
         conn.close()
@@ -1671,16 +2137,15 @@ def list_checks():
                            in_status=in_status,
                            out_due_from=out_due_from, out_due_to=out_due_to, out_supplier=out_supplier,
                            out_status=out_status,
-                           incoming_parties=incoming_parties, outgoing_parties=outgoing_parties
+                           incoming_parties=incoming_parties, outgoing_parties=outgoing_parties,
+                           incoming_pager=incoming_pager, outgoing_pager=outgoing_pager
                            )
 
 
 # update_check_status fonksiyonu
 @app.route('/check/update_status', methods=['POST'])
+@login_required
 def update_check_status():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     check_id = request.form.get('check_id')
     check_type = request.form.get('check_type') 
     new_status = request.form.get('new_status')
@@ -1729,23 +2194,25 @@ def update_check_status():
 
         conn.commit()
 
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f"Çek durumu güncellenirken bir hata oluştu: {e}", "danger")
+        app.logger.exception('Failed to update status of check %s',
+                             request.form.get('check_id'))
+        flash("Çek durumu güncellenirken bir hata oluştu. Çekin durumu "
+              "değişmedi.", "danger")
     finally:
         cur.close()
         conn.close()
 
-    next_url = request.form.get('next') or request.referrer or url_for('debt_status')
+    next_url = (safe_next(request.form.get('next'))
+                or safe_next(request.referrer) or url_for('debt_status'))
     return redirect(next_url)
 
 
 @app.route('/reports/cooperative/select', methods=['GET', 'POST'])
+@login_required
 def select_project_for_coop_report():
     """Kooperatif raporu için proje seçim sayfası."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     if request.method == 'POST':
         project_id = request.form.get('project_id')
         if project_id:
@@ -1757,11 +2224,13 @@ def select_project_for_coop_report():
     
     conn = get_connection()
     cur = conn.cursor()
-    # Sadece kooperatif projelerini listele
-    cur.execute("SELECT id, name FROM projects WHERE project_type = 'cooperative' ORDER BY name")
-    projects = cur.fetchall()
-    cur.close()
-    conn.close()
+    try:
+        # Sadece kooperatif projelerini listele
+        cur.execute("SELECT id, name FROM projects WHERE project_type = 'cooperative' ORDER BY name")
+        projects = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
     
     # Varsayılan olarak bir önceki ayı seçili getir
     last_month = date.today().replace(day=1) - relativedelta(days=1)
@@ -1775,11 +2244,9 @@ def select_project_for_coop_report():
 # cooperative_report fonksiyonu
 
 @app.route('/reports/cooperative/<int:project_id>/<int:year>/<int:month>')
+@login_required
 def cooperative_report(project_id, year, month):
     """Belirli bir kooperatif projesinin aylık finansal raporunu gösterir."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     report_data = {}
@@ -1795,8 +2262,23 @@ def cooperative_report(project_id, year, month):
         end_date = (start_date + relativedelta(months=1)) - relativedelta(days=1)
 
         # Proje bilgilerini al
-        cur.execute("SELECT name, total_flats FROM projects WHERE id = %s", (project_id,))
+        cur.execute("SELECT name, total_flats, project_type FROM projects WHERE id = %s", (project_id,))
         project_info = cur.fetchone()
+
+        if not project_info:
+            flash("Rapor istenen proje bulunamadı.", "warning")
+            return redirect(url_for('select_project_for_coop_report'))
+
+        # This report reads every payment as a monthly due (aidat) and carries a
+        # balance from month to month. That only makes sense for a cooperative.
+        # For a normal project it would still produce numbers, and they would
+        # look right while meaning nothing, so we stop here instead. The select
+        # page lists cooperative projects only, but a bookmarked or hand typed
+        # URL can still reach this route.
+        if project_info[2] != 'cooperative':
+            flash("Bu rapor sadece kooperatif projeler içindir.", "warning")
+            return redirect(url_for('select_project_for_coop_report'))
+
         report_data['project_name'] = project_info[0]
         
         # Üye sayısını (sahibi olan daire sayısı) al
@@ -1804,15 +2286,33 @@ def cooperative_report(project_id, year, month):
         member_count = cur.fetchone()[0]
         report_data['member_count'] = member_count
 
+        # Business rule for every total on this page:
+        # money counts only when it really moved. An incoming check counts
+        # when it is marked 'tahsil_edildi', an outgoing check when it is
+        # marked 'odendi'. A check that is still in the portfolio
+        # ('portfoyde' / 'verildi') closes nothing, and a bounced check
+        # ('karsiliksiz') never counts. The due date is information only:
+        # nothing happens automatically when it passes.
+
         # 1. Önceki Aydan Devreden Bakiyeyi Hesapla
         cur.execute("""
-            SELECT COALESCE(SUM(amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id
+            SELECT COALESCE(SUM(p.amount), 0)
+            FROM payments p
+            JOIN flats f ON p.flat_id = f.id
+            LEFT JOIN checks c ON p.check_id = c.id
             WHERE f.project_id = %s AND p.payment_date < %s
+              AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
         """, (project_id, start_date))
         total_income_before = cur.fetchone()[0]
-        
+
         # Önceki aydan devreden giderler her iki tablodan toplanıyor
-        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s AND expense_date < %s", (project_id, start_date))
+        cur.execute("""
+            SELECT COALESCE(SUM(e.amount), 0)
+            FROM expenses e
+            LEFT JOIN outgoing_checks oc ON e.outgoing_check_id = oc.id
+            WHERE e.project_id = %s AND e.expense_date < %s
+              AND (e.payment_method = 'nakit' OR oc.status = 'odendi')
+        """, (project_id, start_date))
         total_large_expense_before = cur.fetchone()[0]
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s AND expense_date < %s", (project_id, start_date))
         total_petty_cash_before = cur.fetchone()[0]
@@ -1821,16 +2321,27 @@ def cooperative_report(project_id, year, month):
         previous_balance = total_income_before - total_expense_before
         report_data['previous_balance'] = previous_balance
 
-        # 2. Bu Ayın Gelir ve Giderlerini Hesapla
+        # 2. Bu Ayın Gelir ve Giderlerini Hesapla (aynı kural: gerçekten hareket
+        # etmiş para)
         cur.execute("""
-            SELECT COALESCE(SUM(amount), 0) FROM payments p JOIN flats f ON p.flat_id = f.id
+            SELECT COALESCE(SUM(p.amount), 0)
+            FROM payments p
+            JOIN flats f ON p.flat_id = f.id
+            LEFT JOIN checks c ON p.check_id = c.id
             WHERE f.project_id = %s AND p.payment_date BETWEEN %s AND %s
+              AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
         """, (project_id, start_date, end_date))
         current_income = cur.fetchone()[0]
         report_data['current_income'] = current_income
-        
+
         # Rapor ayına ait giderler her iki tablodan toplanıyor
-        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
+        cur.execute("""
+            SELECT COALESCE(SUM(e.amount), 0)
+            FROM expenses e
+            LEFT JOIN outgoing_checks oc ON e.outgoing_check_id = oc.id
+            WHERE e.project_id = %s AND e.expense_date BETWEEN %s AND %s
+              AND (e.payment_method = 'nakit' OR oc.status = 'odendi')
+        """, (project_id, start_date, end_date))
         current_large_expense = cur.fetchone()[0]
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
         current_petty_cash_expense = cur.fetchone()[0]
@@ -1842,31 +2353,133 @@ def cooperative_report(project_id, year, month):
         report_data['end_of_month_balance'] = end_of_month_balance
 
         # 4. Detaylı listeler için verileri çek
+        #
+        # Every row is listed, but only money that really moved is added to the
+        # totals. Each row carries a "counts" flag:
+        #   counts = True   -> cash, or a check marked tahsil_edildi / odendi
+        #   counts = False  -> a check still in the portfolio, or a bounced one
+        # A bounced check is shown as well, but it is in no total at all,
+        # because that money will never arrive.
         cur.execute("""
-            SELECT p.payment_date, c.first_name || ' ' || c.last_name, p.description, p.amount 
-            FROM payments p 
-            JOIN flats f ON p.flat_id = f.id 
-            JOIN customers c ON f.owner_id = c.id
-            WHERE f.project_id = %s AND p.payment_date BETWEEN %s AND %s ORDER BY p.payment_date
+            SELECT p.payment_date, c.first_name, c.last_name,
+                   f.block_name, f.floor, f.flat_no,
+                   p.description, p.amount, p.payment_method, ch.status
+            FROM payments p
+            JOIN flats f ON p.flat_id = f.id
+            LEFT JOIN customers c ON f.owner_id = c.id
+            LEFT JOIN checks ch ON p.check_id = ch.id
+            WHERE f.project_id = %s AND p.payment_date BETWEEN %s AND %s
+            ORDER BY p.payment_date
         """, (project_id, start_date, end_date))
-        income_details = cur.fetchall()
+
+        income_details = []
+        income_collected = Decimal(0)
+        income_pending = Decimal(0)
+        for (pay_date, first_name, last_name, block, floor, flat_no,
+             description, amount, method, check_status) in cur.fetchall():
+            amount = amount or Decimal(0)
+
+            if method == 'çek' and check_status == 'karsiliksiz':
+                status_text, status_class, counts = 'Karşılıksız', 'danger', False
+            elif method == 'çek' and check_status != 'tahsil_edildi':
+                status_text, status_class, counts = 'Çek Portföyde', 'warning text-dark', False
+                income_pending += amount
+            else:
+                status_text, status_class, counts = 'Tahsil Edildi', 'success', True
+                income_collected += amount
+
+            income_details.append({
+                'date': pay_date,
+                # The flat may have no owner yet. The payment still belongs to
+                # the project total, so we list it instead of hiding it.
+                'customer': f"{first_name} {last_name}" if first_name else "Sahibi atanmamış",
+                'flat': f"Blok: {block or 'N/A'}, Kat: {floor}, No: {flat_no}",
+                'description': description,
+                'method': method,
+                'status_text': status_text,
+                'status_class': status_class,
+                'amount': amount,
+                'counts': counts,
+            })
+
         report_data['income_details'] = income_details
+        report_data['income_collected'] = income_collected
+        report_data['income_pending'] = income_pending
 
         # Gider detayları listesi her iki tablodan birleştirilip tarihe göre sıralanıyor
-        cur.execute("SELECT expense_date, title, description, amount FROM expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
-        large_expense_details = cur.fetchall()
-        cur.execute("SELECT expense_date, title, description, amount FROM petty_cash_expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
-        petty_cash_details = cur.fetchall()
-        
-        expense_details = large_expense_details + petty_cash_details
-        expense_details.sort(key=lambda x: x[0]) 
+        cur.execute("""
+            SELECT e.expense_date, e.title, s.name, e.description, e.amount,
+                   e.payment_method, oc.status
+            FROM expenses e
+            LEFT JOIN suppliers s ON e.supplier_id = s.id
+            LEFT JOIN outgoing_checks oc ON e.outgoing_check_id = oc.id
+            WHERE e.project_id = %s AND e.expense_date BETWEEN %s AND %s
+        """, (project_id, start_date, end_date))
+
+        expense_details = []
+        expense_paid = Decimal(0)
+        expense_pending = Decimal(0)
+        for (exp_date, title, supplier_name, description, amount, method,
+             check_status) in cur.fetchall():
+            amount = amount or Decimal(0)
+
+            if method == 'çek' and check_status == 'karsiliksiz':
+                status_text, status_class, counts = 'Karşılıksız', 'danger', False
+            elif method == 'çek' and check_status != 'odendi':
+                status_text, status_class, counts = 'Çek Verildi', 'warning text-dark', False
+                expense_pending += amount
+            else:
+                status_text, status_class, counts = 'Ödendi', 'success', True
+                expense_paid += amount
+
+            expense_details.append({
+                'date': exp_date,
+                'type': 'Büyük Gider',
+                'title': title,
+                'supplier': supplier_name or 'Belirtilmemiş',
+                'description': description,
+                'method': method,
+                'status_text': status_text,
+                'status_class': status_class,
+                'amount': amount,
+                'counts': counts,
+            })
+
+        # Petty cash is always money leaving the safe, so it always counts.
+        cur.execute("""
+            SELECT expense_date, title, description, amount
+            FROM petty_cash_expenses
+            WHERE project_id = %s AND expense_date BETWEEN %s AND %s
+        """, (project_id, start_date, end_date))
+        for exp_date, title, description, amount in cur.fetchall():
+            amount = amount or Decimal(0)
+            expense_paid += amount
+            expense_details.append({
+                'date': exp_date,
+                'type': 'Küçük Gider',
+                'title': title,
+                'supplier': 'Kasa',
+                'description': description,
+                'method': 'nakit',
+                'status_text': 'Ödendi',
+                'status_class': 'success',
+                'amount': amount,
+                'counts': True,
+            })
+
+        expense_details.sort(key=lambda x: x['date'])
         report_data['expense_details'] = expense_details
+        report_data['expense_paid'] = expense_paid
+        report_data['expense_pending'] = expense_pending
         
         month_name = turkish_months.get(start_date.month, "")
         report_data['report_period'] = f"{month_name} {start_date.year}"
 
-    except Exception as e:
-        flash(f"Rapor oluşturulurken bir hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to build cooperative report for project '
+                             '%s (%s-%s)', project_id, year, month)
+        flash("Rapor oluşturulurken bir hata oluştu. Rapor eksik olabilir.",
+              "danger")
     finally:
         cur.close()
         conn.close()
@@ -1879,10 +2492,8 @@ def cooperative_report(project_id, year, month):
 # app.py'deki mevcut project_transactions fonksiyonunu bu kodla değiştirin
 
 @app.route('/project/<int:project_id>/transactions', methods=['GET'])
+@login_required
 def project_transactions(project_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -2018,8 +2629,11 @@ def project_transactions(project_id):
             ls = expense_status.lower()
             expense_data = [e for e in expense_data if e['status'].lower() == ls]
 
-    except Exception as e:
-        flash(f"İşlem listesi alınırken hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to list transactions of project %s',
+                             project_id)
+        flash("İşlem listesi alınırken bir hata oluştu. Liste eksik olabilir.",
+              "danger")
         income_data, expense_data = [], []
         project_name = "Bilinmiyor"
     finally:
@@ -2053,10 +2667,8 @@ def project_transactions(project_id):
 
 
 @app.route('/project/<int:project_id>/overview')
+@login_required
 def project_overview(project_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     
@@ -2085,19 +2697,14 @@ def project_overview(project_id):
     expense_parties = []
 
     try:
-        # --- HATA ÇÖZÜMÜ: 42026 gibi yanlış yılları otomatik düzeltip çöküşü önler ---
-        try:
-            cur.execute("""
-                UPDATE payments SET payment_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM payment_date) > 3000;
-                UPDATE supplier_payments SET payment_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM payment_date) > 3000;
-                UPDATE outgoing_checks SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
-                UPDATE checks SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
-                UPDATE installment_schedule SET due_date = CURRENT_DATE WHERE EXTRACT(YEAR FROM due_date) > 3000;
-            """)
-            conn.commit()
-        except Exception:
-            conn.rollback()
-        # ------------------------------------------------------------------------------------
+        # Safety net for out of range dates. See repair_out_of_range_dates.
+        repair_out_of_range_dates(conn, cur, [
+            ('payments', 'payment_date'),
+            ('supplier_payments', 'payment_date'),
+            ('outgoing_checks', 'due_date'),
+            ('checks', 'due_date'),
+            ('installment_schedule', 'due_date'),
+        ], 'project_overview')
 
         cur.execute("SELECT name, project_type FROM projects WHERE id = %s", (project_id,))
         project_info = cur.fetchone()
@@ -2154,14 +2761,21 @@ def project_overview(project_id):
             cur.execute(income_query, (project_id, project_id))
             for row in cur.fetchall():
                 due_date, amount, first, last, block, floor, flat_no, total_cash, total_cleared_check, total_portfolio_check, cumulative_amount = row
+                # An installment is closed only by money that really arrived:
+                # cash, and checks marked 'tahsil_edildi'. A check still in the
+                # portfolio closes nothing; it is shown but not counted. The
+                # totals at the top of the page already work this way.
                 total_cleared_payments = total_cash + total_cleared_check
-                total_valid_payments = total_cleared_payments + total_portfolio_check
-                paid_so_far = max(0, total_valid_payments - (cumulative_amount - amount))
+                total_with_portfolio = total_cleared_payments + total_portfolio_check
+                paid_so_far = max(0, total_cleared_payments - (cumulative_amount - amount))
                 paid_this_installment = min(amount, paid_so_far)
                 if paid_this_installment >= amount:
                     if cumulative_amount <= total_cash: status, status_class, payment_method = "Ödendi", "bg-success", "nakit"
-                    elif cumulative_amount <= total_cleared_payments: status, status_class, payment_method = "Ödendi", "bg-success", "çek"
-                    else: status, status_class, payment_method = "Çek Portföyde", "bg-warning text-dark", "çek"
+                    else: status, status_class, payment_method = "Ödendi", "bg-success", "çek"
+                elif total_with_portfolio >= cumulative_amount:
+                    # A check would cover this installment, but it has not been
+                    # cashed yet, so the debt is still open.
+                    status, status_class, payment_method = "Çek Portföyde", "bg-warning text-dark", "çek"
                 elif paid_this_installment > 0: 
                     status, status_class = "Kısmen Ödendi", "bg-info text-dark"
                     payment_method = None
@@ -2209,18 +2823,23 @@ def project_overview(project_id):
         for row in cur.fetchall():
             due_date, amount, title, sup_name, total_cash, total_cleared_check, total_portfolio_check, cumulative_amount = row
             
+            # Same rule as the income side: an expense installment is closed
+            # only by money that really left, that is cash and outgoing checks
+            # marked 'odendi'. A check that is only handed over ('verildi')
+            # closes nothing; it is shown but not counted.
             total_cleared_payments = total_cash + total_cleared_check
-            total_valid_payments = total_cleared_payments + total_portfolio_check
-            paid_so_far = max(0, total_valid_payments - (cumulative_amount - amount))
+            total_with_portfolio = total_cleared_payments + total_portfolio_check
+            paid_so_far = max(0, total_cleared_payments - (cumulative_amount - amount))
             paid_this_installment = min(amount, paid_so_far)
             
             if paid_this_installment >= amount:
                 if cumulative_amount <= total_cash: 
                     status, status_class, payment_method = "Ödendi", "bg-success", "nakit"
-                elif cumulative_amount <= total_cleared_payments: 
-                    status, status_class, payment_method = "Ödendi", "bg-success", "çek"
                 else: 
-                    status, status_class, payment_method = "Çek Verildi", "bg-warning text-dark", "çek"
+                    status, status_class, payment_method = "Ödendi", "bg-success", "çek"
+            elif total_with_portfolio >= cumulative_amount:
+                # A handed over check would cover this, but it is not paid yet.
+                status, status_class, payment_method = "Çek Verildi", "bg-warning text-dark", "çek"
             elif paid_this_installment > 0:
                 status, status_class = "Kısmen Ödendi", "bg-info text-dark"
                 payment_method = None
@@ -2282,8 +2901,10 @@ def project_overview(project_id):
         income_items.sort(key=lambda x: sort_logic(x, sort_by), reverse=is_reverse)
         expense_items.sort(key=lambda x: sort_logic(x, sort_by), reverse=is_reverse)
 
-    except Exception as e:
-        flash(f"Proje genel bakışı oluşturulurken hata: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to build overview of project %s', project_id)
+        flash("Proje genel bakışı oluşturulurken bir hata oluştu. Sayfa eksik "
+              "olabilir.", "danger")
     finally:
         cur.close()
         conn.close()
@@ -2296,23 +2917,33 @@ def project_overview(project_id):
 
 
 @app.route('/project/<int:project_id>/petty_cash/add', methods=['POST'])
+@login_required
 def add_petty_cash(project_id):
     """Bir projeye yeni bir küçük gider ekler."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
+    # Read this before the try block. The last line of this function needs it
+    # even when the amount below cannot be parsed, and reading it inside the
+    # try would leave it undefined on that path.
+    next_url = safe_next(request.form.get('next'))
+
     try:
         title = request.form.get('petty_cash_title')
         amount = Decimal(request.form.get('petty_cash_amount').replace('.', '').replace(',', '.'))
-        expense_date = request.form.get('petty_cash_date')
+        expense_date = parse_form_date(request.form.get('petty_cash_date'),
+                                       "Tarih")
         description = request.form.get('petty_cash_description')
-        next_url = request.form.get('next')
 
         if not all([title, amount, expense_date]):
-            raise ValueError("Başlık, Tutar ve Tarih alanları zorunludur.")
+            raise ValidationError("Başlık, Tutar ve Tarih alanları zorunludur.")
         
         conn = get_connection()
         cur = conn.cursor()
+
+        # Double submit guard, in the same transaction as the insert below.
+        if not claim_submission_token(cur, request.form.get('submission_token'), 'add_petty_cash'):
+            conn.rollback()
+            flash('Bu işlem zaten kaydedilmişti.', 'info')
+            return redirect(next_url or url_for('list_expenses', project_id=project_id))
+
         cur.execute(
             "INSERT INTO petty_cash_expenses (project_id, title, amount, expense_date, description) VALUES (%s, %s, %s, %s, %s)",
             (project_id, title, amount, expense_date, description)
@@ -2320,8 +2951,13 @@ def add_petty_cash(project_id):
         conn.commit()
         flash("Küçük gider başarıyla eklendi.", "success")
 
-    except Exception as e:
-        flash(f"Küçük gider eklenirken bir hata oluştu: {e}", "danger")
+    except ValidationError as e:
+        flash(str(e), "danger")
+    except Exception:
+        app.logger.exception('Failed to add petty cash expense to project %s',
+                             project_id)
+        flash("Küçük gider eklenirken bir hata oluştu. Kayıt yapılmadı, "
+              "lütfen bilgileri kontrol edip tekrar deneyin.", "danger")
     finally:
         if 'conn' in locals() and conn:
             cur.close()
@@ -2331,20 +2967,21 @@ def add_petty_cash(project_id):
 
 
 @app.route('/petty_cash/<int:item_id>/delete', methods=['POST'])
+@login_required
 def delete_petty_cash(item_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
     project_id = request.form.get('project_id')
-    next_url = request.form.get('next')
+    next_url = safe_next(request.form.get('next'))
     conn = get_connection()
     cur = conn.cursor()
     try:
         cur.execute("DELETE FROM petty_cash_expenses WHERE id = %s", (item_id,))
         conn.commit()
         flash('Küçük gider kaydı silindi.', 'success')
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f'Küçük gider silinirken hata oluştu: {e}', 'danger')
+        app.logger.exception('Failed to delete petty cash expense %s', item_id)
+        flash('Küçük gider silinirken bir hata oluştu. Kayıt silinmedi.',
+              'danger')
     finally:
         cur.close()
         conn.close()
@@ -2355,27 +2992,32 @@ def delete_petty_cash(item_id):
 
 
 @app.route('/petty_cash/<int:item_id>/edit', methods=['GET', 'POST'])
+@login_required
 def edit_petty_cash(item_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
     conn = get_connection()
     cur = conn.cursor()
     if request.method == 'POST':
         title = request.form.get('title')
         amount_raw = request.form.get('amount') or '0'
         amount = Decimal(amount_raw.replace('.', '').replace(',', '.'))
-        expense_date = request.form.get('expense_date')
         description = request.form.get('description')
         project_id = request.args.get('project_id') or request.form.get('project_id')
-        next_url = request.form.get('next')
+        next_url = safe_next(request.form.get('next'))
         try:
+            expense_date = parse_form_date(request.form.get('expense_date'),
+                                           "Tarih")
             cur.execute("UPDATE petty_cash_expenses SET title=%s, amount=%s, expense_date=%s, description=%s WHERE id=%s",
                         (title, amount, expense_date, description, item_id))
             conn.commit()
             flash('Küçük gider güncellendi.', 'success')
-        except Exception as e:
+        except ValidationError as e:
             conn.rollback()
-            flash(f'Güncelleme sırasında hata oluştu: {e}', 'danger')
+            flash(str(e), 'danger')
+        except Exception:
+            conn.rollback()
+            app.logger.exception('Failed to update petty cash expense %s', item_id)
+            flash('Küçük gider güncellenirken bir hata oluştu. Değişiklikler '
+                  'kaydedilmedi.', 'danger')
         finally:
             cur.close()
             conn.close()
@@ -2398,16 +3040,14 @@ def edit_petty_cash(item_id):
 
 # 4. Gider (Tedarikçi) Planı Yönetme Rotası
 @app.route('/expense/<int:expense_id>/manage_plan', methods=['GET', 'POST'])
+@login_required
 def manage_expense_plan(expense_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
     if request.method == 'POST':
         try:
-            next_url = request.form.get('next') or request.args.get('next')
+            next_url = safe_next(request.form.get('next') or request.args.get('next'))
             plan_json = request.form.get('plan_json')
             rows_raw = []
             if plan_json:
@@ -2429,7 +3069,7 @@ def manage_expense_plan(expense_id):
                 parsed_rows.append((due_date, amount))
 
             if not parsed_rows:
-                raise ValueError("En az bir taksit girilmelidir.")
+                raise ValidationError("En az bir taksit girilmelidir.")
 
             parsed_rows.sort(key=lambda x: x[0])
 
@@ -2462,9 +3102,15 @@ def manage_expense_plan(expense_id):
             cur.execute("SELECT project_id FROM expenses WHERE id = %s", (expense_id,))
             return redirect(next_url or url_for('list_expenses', project_id=cur.fetchone()[0]))
 
-        except Exception as e:
+        except ValidationError as e:
             conn.rollback()
-            flash(f'Gider planı güncellenirken hata: {e}', 'danger')
+            flash(str(e), 'danger')
+        except Exception:
+            conn.rollback()
+            app.logger.exception('Failed to update the plan of expense %s',
+                                 expense_id)
+            flash('Gider planı güncellenirken bir hata oluştu. Plan '
+                  'değiştirilmedi.', 'danger')
         finally:
             cur.close()
             conn.close()
@@ -2484,11 +3130,9 @@ def manage_expense_plan(expense_id):
 
 
 @app.route('/expense/<int:expense_id>/delete', methods=['POST'])
+@login_required
 def delete_expense(expense_id):
     """Belirli bir gideri ve varsa ilişkili çekini veritabanından siler."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     project_id = request.form.get('project_id')
 
     conn = get_connection()
@@ -2511,9 +3155,11 @@ def delete_expense(expense_id):
 
         conn.commit()
         flash('Gider ve varsa ilgili çeki başarıyla silindi.', 'success')
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f'Gider silinirken bir hata oluştu: {e}', 'danger')
+        app.logger.exception('Failed to delete expense %s', expense_id)
+        flash('Gider silinirken bir hata oluştu. Gider silinmedi, veriler '
+              'korundu.', 'danger')
     finally:
         cur.close()
         conn.close()
@@ -2525,10 +3171,8 @@ def delete_expense(expense_id):
 
 
 @app.route('/audit-logs')
+@login_required
 def audit_logs():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     action_filter = request.args.get('action', '').strip()
     entity_filter = request.args.get('entity_type', '').strip()
     user_filter = request.args.get('user', '').strip()
@@ -2612,8 +3256,10 @@ def audit_logs():
         cur.execute("SELECT DISTINCT entity_type FROM audit_logs ORDER BY entity_type")
         entities = [e[0] for e in cur.fetchall()]
 
-    except Exception as e:
-        flash(f"Loglar yüklenirken hata: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to load audit logs')
+        flash("İşlem kayıtları yüklenirken bir hata oluştu. Liste eksik "
+              "olabilir.", "danger")
         rows, actions, entities = [], [], []
     finally:
         cur.close()
@@ -2633,29 +3279,29 @@ def audit_logs():
 # get_flats_for_project fonksiyonu
 
 @app.route('/api/project/<int:project_id>/flats')
+@json_login_required({'error': 'Yetkisiz erişim'})
 def get_flats_for_project(project_id):
     """
     Bir projeye ait, sahibi olan daireleri listeler.
     Daire metninde blok, kat, no ve sahip ismini içerir.
     """
-    if 'user_id' not in session:
-        return jsonify({'error': 'Yetkisiz erişim'}), 401
-
     conn = get_connection()
     cur = conn.cursor()
+    try:
     
-    cur.execute("""
-        SELECT 
-            f.id, f.flat_no, f.floor, f.room_type, f.block_name,
-            c.first_name, c.last_name
-        FROM flats f
-        JOIN customers c ON f.owner_id = c.id
-        WHERE f.project_id = %s AND f.owner_id IS NOT NULL
-        ORDER BY f.block_name, f.floor, f.flat_no
-    """, (project_id,))
-    flats_raw = cur.fetchall()
-    cur.close()
-    conn.close()
+        cur.execute("""
+            SELECT 
+                f.id, f.flat_no, f.floor, f.room_type, f.block_name,
+                c.first_name, c.last_name
+            FROM flats f
+            JOIN customers c ON f.owner_id = c.id
+            WHERE f.project_id = %s AND f.owner_id IS NOT NULL
+            ORDER BY f.block_name, f.floor, f.flat_no
+        """, (project_id,))
+        flats_raw = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
 
     flats = [{
         'id': f[0], 
@@ -2668,16 +3314,14 @@ def get_flats_for_project(project_id):
 # app.py dosyasındaki manage_payment_plan fonksiyonunu bununla değiştirin:
 
 @app.route('/flat/<int:flat_id>/manage_plan', methods=['GET', 'POST'])
+@login_required
 def manage_payment_plan(flat_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
     if request.method == 'POST':
         try:
-            next_url = request.form.get('next') or request.args.get('next')
+            next_url = safe_next(request.form.get('next') or request.args.get('next'))
             plan_json = request.form.get('plan_json')
 
             # --- 1) Form verisini oku ---
@@ -2701,18 +3345,18 @@ def manage_payment_plan(flat_id):
                 try:
                     due_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                 except ValueError:
-                    raise ValueError(f"Geçersiz tarih: {date_str}")
+                    raise ValidationError(f"Geçersiz tarih: {date_str}")
 
                 cleaned = amount_str.replace(' ', '').replace('.', '').replace(',', '.')
                 try:
                     amount = Decimal(cleaned)
                 except Exception:
-                    raise ValueError(f"Geçersiz tutar: {amount_str}")
+                    raise ValidationError(f"Geçersiz tutar: {amount_str}")
 
                 parsed_rows.append((due_date, amount))
 
             if not parsed_rows:
-                raise ValueError("En az bir taksit girilmelidir.")
+                raise ValidationError("En az bir taksit girilmelidir.")
 
             # Tarihe göre sırala (ID'lere güvenmek yerine)
             parsed_rows.sort(key=lambda x: x[0])
@@ -2752,9 +3396,20 @@ def manage_payment_plan(flat_id):
             flash('Ödeme planı başarıyla güncellendi.', 'success')
             return redirect(next_url or url_for('debt_status'))
 
-        except Exception as e:
+        except ValidationError as e:
             conn.rollback()
-            flash(f'Plan güncellenirken hata oluştu: {e}', 'danger')
+            flash(str(e), 'danger')
+            # Back to the plan form, which shows the message and keeps the
+            # 'next' address for the save that follows. Going on to next_url
+            # here would lose the message: /debts does not render flashes.
+            return redirect(url_for('manage_payment_plan', flat_id=flat_id,
+                                    next=next_url or None))
+        except Exception:
+            conn.rollback()
+            app.logger.exception('Failed to update the payment plan of flat %s',
+                                 flat_id)
+            flash('Ödeme planı güncellenirken bir hata oluştu. Plan '
+                  'değiştirilmedi.', 'danger')
             return redirect(next_url or url_for('manage_payment_plan', flat_id=flat_id))
         finally:
             cur.close()
@@ -2784,11 +3439,9 @@ def manage_payment_plan(flat_id):
 # print_debt_statement fonksiyonu
 
 @app.route('/flat/<int:flat_id>/print')
+@login_required
 def print_debt_statement(flat_id):
     """Belirli bir dairenin borç dökümünü yazdırma için hazırlar."""
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -2816,8 +3469,16 @@ def print_debt_statement(flat_id):
         """, (flat_id,))
         installments_raw = cur.fetchall()
 
-        # 3. Daire için yapılan toplam ödemeyi çek
-        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE flat_id = %s", (flat_id,))
+        # 3. Daire için yapılan toplam ödemeyi çek. Only cash and cleared
+        # checks count. A check in the portfolio or a bounced one closes
+        # no debt, so it must stay out of this total.
+        cur.execute("""
+            SELECT COALESCE(SUM(p.amount), 0)
+            FROM payments p
+            LEFT JOIN checks c ON p.check_id = c.id
+            WHERE p.flat_id = %s
+              AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
+        """, (flat_id,))
         total_paid = cur.fetchone()[0]
 
         # 3.5. Ödeme kayıtlarını çek
@@ -2877,8 +3538,10 @@ def print_debt_statement(flat_id):
 
         return render_template('print_statement.html', data=statement_data)
 
-    except Exception as e:
-        flash(f"Döküm oluşturulurken bir hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to build the debt statement of flat %s',
+                             flat_id)
+        flash("Döküm oluşturulurken bir hata oluştu.", "danger")
         return redirect(url_for('debt_status'))
     finally:
         cur.close()
@@ -2888,15 +3551,14 @@ def print_debt_statement(flat_id):
 # list_payments fonksiyonu
 
 @app.route('/payments')
+@login_required
 def list_payments():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     # Filtreleme parametreleri
     project = request.args.get('project')
     start = request.args.get('start_date')
     end = request.args.get('end_date')
     customer_id = request.args.get('customer_id')
+    search = (request.args.get('search') or '').strip()
     
     # Sıralama parametreleri
     sort_by = request.args.get('sort_by', 'tarih')
@@ -2932,28 +3594,42 @@ def list_payments():
     if customer_id:
         filters.append("c.id = %s")
         params.append(customer_id)
+    if search:
+        like = f"%{search}%"
+        filters.append("(c.first_name ILIKE %s OR c.last_name ILIKE %s"
+                       " OR (c.first_name || ' ' || c.last_name) ILIKE %s"
+                       " OR p.description ILIKE %s)")
+        params.extend([like, like, like, like])
 
     if filters:
         sql += " WHERE " + " AND ".join(filters)
 
     sql += f" ORDER BY {order_by_column} {order.upper()}"
 
+    page = get_page_number()
+    limit, offset = page_window(page)
+    sql += " LIMIT %s OFFSET %s"
+    params.extend([limit, offset])
+
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(sql, tuple(params))
-    payments = cur.fetchall()
+    try:
+        cur.execute(sql, tuple(params))
+        payments, payments_pager = split_page(cur.fetchall(), page)
     
-    cur.execute("SELECT name FROM projects ORDER BY name")
-    all_projects = [r[0] for r in cur.fetchall()]
+        cur.execute("SELECT name FROM projects ORDER BY name")
+        all_projects = [r[0] for r in cur.fetchall()]
     
-    cur.execute("SELECT id, first_name, last_name FROM customers ORDER BY first_name, last_name")
-    all_customers = cur.fetchall()
+        cur.execute("SELECT id, first_name, last_name FROM customers ORDER BY first_name, last_name")
+        all_customers = cur.fetchall()
     
-    cur.close()
-    conn.close()
+    finally:
+        cur.close()
+        conn.close()
 
     return render_template('payments.html',
                            payments=payments,
+                           payments_pager=payments_pager,
                            all_projects=all_projects,
                            all_customers=all_customers,
                            selected_project=project,
@@ -2964,10 +3640,8 @@ def list_payments():
                            order=order,
                            user_name=session.get('user_name'))
 @app.route('/reports')
+@login_required
 def reports():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     today = date.today()
@@ -2980,15 +3654,97 @@ def reports():
         d = min(base_date.day, monthrange(y, m)[1])
         return date(y, m, d)
 
+    # These go to the template, so they must exist even when a query fails.
+    # Otherwise render_template below raises UnboundLocalError and the user
+    # never sees the error message we prepared.
+    project_summaries = []
+    monthly_series = {}
+    check_series = {}
+    projection_series = {}
+    overdue_items = {}
+    month_boxes = {}
+
     try:
         cur.execute("SELECT id, name, project_type FROM projects ORDER BY name")
         projects = cur.fetchall()
-        project_summaries = []
-        monthly_series = {}
-        check_series = {}
-        projection_series = {}
-        overdue_items = {}
-        month_boxes = {}
+
+        # --- 12 month charts, for every project at once ---------------------
+        # Each chart used to run its own query per project and per month.
+        # These five queries return the same sums grouped by project and
+        # month; the project loop below only looks them up. Every query keeps
+        # the joins and filters of the one it replaced, so no number changes.
+        chart_months = [add_months(start_month, -offset)
+                        for offset in range(11, -1, -1)]
+        window_start = chart_months[0]
+        window_end = add_months(start_month, 1)
+        window = (window_start, window_end)
+
+        # Real income: cash and cleared checks.
+        cur.execute("""
+            SELECT f.project_id,
+                   date_trunc('month', p.payment_date)::date,
+                   COALESCE(SUM(p.amount), 0)
+            FROM payments p
+            JOIN flats f ON p.flat_id = f.id
+            LEFT JOIN checks c ON p.check_id = c.id
+            WHERE (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
+              AND p.payment_date >= %s AND p.payment_date < %s
+            GROUP BY 1, 2
+        """, window)
+        chart_income = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+
+        # Real expense, large: cash and paid outgoing checks.
+        cur.execute("""
+            SELECT e.project_id,
+                   date_trunc('month', sp.payment_date)::date,
+                   COALESCE(SUM(sp.amount), 0)
+            FROM supplier_payments sp
+            JOIN expenses e ON sp.expense_id = e.id
+            LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
+            WHERE (sp.payment_method = 'nakit' OR oc.status = 'odendi')
+              AND sp.payment_date >= %s AND sp.payment_date < %s
+            GROUP BY 1, 2
+        """, window)
+        chart_large = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+
+        # Real expense, petty cash.
+        cur.execute("""
+            SELECT project_id,
+                   date_trunc('month', expense_date)::date,
+                   COALESCE(SUM(amount), 0)
+            FROM petty_cash_expenses
+            WHERE expense_date >= %s AND expense_date < %s
+            GROUP BY 1, 2
+        """, window)
+        chart_petty = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+
+        # Incoming checks by due month, in the portfolio and cleared.
+        cur.execute("""
+            SELECT f.project_id, c.status,
+                   date_trunc('month', c.due_date)::date,
+                   COALESCE(SUM(c.amount), 0)
+            FROM checks c
+            JOIN payments p ON c.id = p.check_id
+            JOIN flats f ON p.flat_id = f.id
+            WHERE c.status IN ('portfoyde', 'tahsil_edildi')
+              AND c.due_date >= %s AND c.due_date < %s
+            GROUP BY 1, 2, 3
+        """, window)
+        chart_in_checks = {(r[0], r[1], r[2]): r[3] for r in cur.fetchall()}
+
+        # Outgoing checks by due month, handed over and paid.
+        cur.execute("""
+            SELECT e.project_id, oc.status,
+                   date_trunc('month', oc.due_date)::date,
+                   COALESCE(SUM(oc.amount), 0)
+            FROM outgoing_checks oc
+            JOIN supplier_payments sp ON oc.id = sp.check_id
+            JOIN expenses e ON sp.expense_id = e.id
+            WHERE oc.status IN ('verildi', 'odendi')
+              AND oc.due_date >= %s AND oc.due_date < %s
+            GROUP BY 1, 2, 3
+        """, window)
+        chart_out_checks = {(r[0], r[1], r[2]): r[3] for r in cur.fetchall()}
 
         for project_id, project_name, project_type in projects:
             summary = {
@@ -3082,54 +3838,15 @@ def reports():
                     'unpaid_installments': unpaid_installments
                 })
 
-                # --- Aylık gelir-gider (son 12 ay) ---
-                labels, income_series, expense_series = [], [], []
-                for offset in range(11, -1, -1):
-                    month_start = add_months(start_month, -offset)
-                    month_end = add_months(month_start, 1)
-                    labels.append(month_start.strftime("%b %Y"))
-
-                    # Gerçekleşen gelir (nakit + tahsil edilen çek)
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(p.amount), 0)
-                        FROM payments p
-                        JOIN flats f ON p.flat_id = f.id
-                        LEFT JOIN checks c ON p.check_id = c.id
-                        WHERE f.project_id = %s
-                          AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
-                          AND p.payment_date >= %s AND p.payment_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    income_series.append(float(cur.fetchone()[0]))
-
-                    # Gerçekleşen gider (nakit + ödenmiş çek)
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(sp.amount), 0)
-                        FROM supplier_payments sp
-                        JOIN expenses e ON sp.expense_id = e.id
-                        LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
-                        WHERE e.project_id = %s
-                          AND (sp.payment_method = 'nakit' OR oc.status = 'odendi')
-                          AND sp.payment_date >= %s AND sp.payment_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    paid_large = float(cur.fetchone()[0])
-
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(amount), 0)
-                        FROM petty_cash_expenses
-                        WHERE project_id = %s
-                          AND expense_date >= %s AND expense_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    petty_paid = float(cur.fetchone()[0])
-
+                # --- 12 month income and expense (from the grouped queries) ---
+                # float() on each part, then the sum: the same arithmetic the
+                # per month queries did, so the floats come out identical.
+                labels = [m.strftime("%b %Y") for m in chart_months]
+                income_series, expense_series = [], []
+                for m in chart_months:
+                    income_series.append(float(chart_income.get((project_id, m), 0)))
+                    paid_large = float(chart_large.get((project_id, m), 0))
+                    petty_paid = float(chart_petty.get((project_id, m), 0))
                     expense_series.append(paid_large + petty_paid)
 
                 net_series = [inc - exp for inc, exp in zip(income_series, expense_series)]
@@ -3140,71 +3857,17 @@ def reports():
                     'net': net_series
                 }
 
-                # --- Aylık çek durumu (son 12 ay) ---
-                chk_labels = labels  # aynı etiketler
-                in_port, in_clear, out_given, out_paid = [], [], [], []
-                for offset in range(11, -1, -1):
-                    month_start = add_months(start_month, -offset)
-                    month_end = add_months(month_start, 1)
-
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(c.amount), 0)
-                        FROM checks c
-                        JOIN payments p ON c.id = p.check_id
-                        JOIN flats f ON p.flat_id = f.id
-                        WHERE f.project_id = %s AND c.status = 'portfoyde'
-                          AND c.due_date >= %s AND c.due_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    in_port.append(float(cur.fetchone()[0]))
-
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(c.amount), 0)
-                        FROM checks c
-                        JOIN payments p ON c.id = p.check_id
-                        JOIN flats f ON p.flat_id = f.id
-                        WHERE f.project_id = %s AND c.status = 'tahsil_edildi'
-                          AND c.due_date >= %s AND c.due_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    in_clear.append(float(cur.fetchone()[0]))
-
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(oc.amount), 0)
-                        FROM outgoing_checks oc
-                        JOIN supplier_payments sp ON oc.id = sp.check_id
-                        JOIN expenses e ON sp.expense_id = e.id
-                        WHERE e.project_id = %s AND oc.status = 'verildi'
-                          AND oc.due_date >= %s AND oc.due_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    out_given.append(float(cur.fetchone()[0]))
-
-                    cur.execute(
-                        """
-                        SELECT COALESCE(SUM(oc.amount), 0)
-                        FROM outgoing_checks oc
-                        JOIN supplier_payments sp ON oc.id = sp.check_id
-                        JOIN expenses e ON sp.expense_id = e.id
-                        WHERE e.project_id = %s AND oc.status = 'odendi'
-                          AND oc.due_date >= %s AND oc.due_date < %s
-                        """,
-                        (project_id, month_start, month_end)
-                    )
-                    out_paid.append(float(cur.fetchone()[0]))
+                # --- 12 month check status (from the grouped queries) ---
+                def check_line(sums, status):
+                    return [float(sums.get((project_id, status, m), 0))
+                            for m in chart_months]
 
                 check_series[project_id] = {
-                    'labels': chk_labels,
-                    'incoming_portfolio': in_port,
-                    'incoming_cleared': in_clear,
-                    'outgoing_given': out_given,
-                    'outgoing_paid': out_paid
+                    'labels': labels,
+                    'incoming_portfolio': check_line(chart_in_checks, 'portfoyde'),
+                    'incoming_cleared': check_line(chart_in_checks, 'tahsil_edildi'),
+                    'outgoing_given': check_line(chart_out_checks, 'verildi'),
+                    'outgoing_paid': check_line(chart_out_checks, 'odendi')
                 }
 
                 # --- Bu ay kutuları ---
@@ -3403,11 +4066,10 @@ def reports():
 
             project_summaries.append(summary)
 
-    except Exception as e:
-        import traceback
-        print("REPORTS ERROR:", e)
-        traceback.print_exc()
-        flash(f"Raporlar oluşturulurken hata oluştu: {e}", "danger")
+    except Exception:
+        app.logger.exception('Failed to build the reports page')
+        flash("Raporlar oluşturulurken bir hata oluştu. Rapor eksik olabilir.",
+              "danger")
     finally:
         cur.close()
         conn.close()
@@ -3426,10 +4088,8 @@ def reports():
 
 # dashboard fonksiyonu
 @app.route('/dashboard')
+@login_required
 def dashboard():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
     today = date.today()
@@ -3509,9 +4169,10 @@ def dashboard():
 
         monthly_cash_flow = {'income': monthly_income, 'expense': monthly_expense, 'net': monthly_income - monthly_expense}
 
-    except Exception as e:
-        flash(f"Dashboard yüklenirken bir hata oluştu: {e}", "danger")
-        print(f"DASHBOARD HATASI: {e}")
+    except Exception:
+        app.logger.exception('Failed to build the dashboard')
+        flash("Ana sayfa yüklenirken bir hata oluştu. Bazı rakamlar eksik "
+              "olabilir.", "danger")
         total_customers, total_flats = 0, 0
         projects, overdue_customer_payments, upcoming_customer_payments, overdue_expense_payments, upcoming_expense_payments, upcoming_incoming_checks, upcoming_outgoing_checks = [], [], [], [], [], [], []
         monthly_cash_flow = {'income': 0, 'expense': 0, 'net': 0}
@@ -3535,34 +4196,38 @@ def dashboard():
 
 
 @app.route('/api/monthly_payments')
+@json_login_required({'error': 'Yetkisiz erişim'})
 def monthly_payments_api():
     """Son 12 ayın aylık toplam ödemelerini JSON formatında döndürür."""
-    if 'user_id' not in session:
-        return jsonify({'error': 'Yetkisiz erişim'}), 401
-
     conn = get_connection()
     cur = conn.cursor()
+    try:
 
-    # Son 12 ayın verisini çekmek için veritabanına özel bir sorgu gönder
-    # Bu sorgu, her ayın başlangıcını ve o aydaki toplam ödemeyi hesaplar.
-    # `DATE_TRUNC('month', ...)` fonksiyonu tarihi ayın ilk gününe yuvarlar
-    cur.execute("""
-        SELECT 
-            DATE_TRUNC('month', payment_date)::DATE AS month, 
-            SUM(amount) AS total_amount
-        FROM 
-            payments
-        WHERE 
-            payment_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
-        GROUP BY 
-            month
-        ORDER BY 
-            month;
-    """)
+        # Son 12 ayın verisini çekmek için veritabanına özel bir sorgu gönder
+        # Bu sorgu, her ayın başlangıcını ve o aydaki toplam ödemeyi hesaplar.
+        # `DATE_TRUNC('month', ...)` fonksiyonu tarihi ayın ilk gününe yuvarlar
+        # Only cash and cleared checks are real money. A check in the portfolio
+        # or a bounced one must not appear as collected income on the chart.
+        cur.execute("""
+            SELECT 
+                DATE_TRUNC('month', p.payment_date)::DATE AS month, 
+                SUM(p.amount) AS total_amount
+            FROM 
+                payments p
+                LEFT JOIN checks c ON p.check_id = c.id
+            WHERE 
+                p.payment_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+                AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
+            GROUP BY 
+                month
+            ORDER BY 
+                month;
+        """)
     
-    results = cur.fetchall()
-    cur.close()
-    conn.close()
+        results = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
 
     # Veritabanından gelen veriyi grafiğin beklediği formata dönüştür
     labels = []
@@ -3587,17 +4252,22 @@ def index():
 
 @app.route('/payment/new', defaults={'installment_id': None}, methods=['GET', 'POST'])
 @app.route('/payment/new/<int:installment_id>', methods=['GET', 'POST'])
+@login_required
 def new_payment(installment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
     conn = get_connection()
     cur = conn.cursor()
 
     if request.method == 'POST':
         # ... (POST kısmı aynı kalıyor, DOKUNMAYIN) ...
         try:
-            next_url = request.form.get('next') or request.args.get('next')
+            # Double submit guard. It runs before any write and on this same
+            # transaction, so a second click cannot create a second payment.
+            if not claim_submission_token(cur, request.form.get('submission_token'), 'new_payment'):
+                conn.rollback()
+                flash('Bu işlem zaten kaydedilmişti.', 'info')
+                return redirect(request.form.get('next') or request.args.get('next') or url_for('debt_status'))
+
+            next_url = safe_next(request.form.get('next') or request.args.get('next'))
             flat_id = int(request.form.get('flat_id'))
             # Formdan gelen formatlı sayıyı temizleyerek Decimal'e çeviriyoruz
             payment_amount_str = request.form.get('amount')
@@ -3672,9 +4342,12 @@ def new_payment(installment_id):
 
             conn.commit()
             return redirect(next_url or url_for('debt_status'))
-        except Exception as e:
+        except Exception:
             conn.rollback()
-            flash(f'Ödeme kaydedilirken bir hata oluştu: {e}', 'danger')
+            app.logger.exception('Failed to save payment (installment_id=%s)',
+                                 installment_id)
+            flash('Ödeme kaydedilirken bir hata oluştu. Ödeme kaydedilmedi.',
+                  'danger')
             # Hata durumunda hangi sayfaya yönlendireceğimizi belirle
             redirect_kwargs = {}
             if installment_id:
@@ -3800,9 +4473,8 @@ def reconcile_supplier_payments(cur, expense_id):
                            
 # GÜNCELLENMİŞ FONKSİYON: delete_payment
 @app.route('/payment/<int:payment_id>/delete', methods=['POST'])
+@login_required
 def delete_payment(payment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -3830,9 +4502,11 @@ def delete_payment(payment_id):
         
         conn.commit()
         flash('Ödeme kaydı silindi ve taksit durumu güncellendi.', 'success')
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        flash(f'Ödeme silinirken hata oluştu: {e}', 'danger')
+        app.logger.exception('Failed to delete payment %s', payment_id)
+        flash('Ödeme silinirken bir hata oluştu. Ödeme silinmedi, taksit '
+              'durumları değişmedi.', 'danger')
     finally:
         cur.close()
         conn.close()
@@ -3877,14 +4551,13 @@ def reconcile_customer_payments(cur, flat_id):
 
 # GÜNCELLENMİŞ FONKSİYON: edit_payment
 @app.route('/payment/<int:payment_id>/edit', methods=['GET', 'POST'])
+@login_required
 def edit_payment(payment_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
     conn = get_connection()
     cur = conn.cursor()
     if request.method == 'POST':
         try:
-            next_url = request.form.get('next') or request.args.get('next')
+            next_url = safe_next(request.form.get('next') or request.args.get('next'))
             amount = Decimal(request.form.get('amount').replace('.', '').replace(',', '.'))
             payment_date_str = request.form.get('payment_date')
             description = request.form.get('description')
