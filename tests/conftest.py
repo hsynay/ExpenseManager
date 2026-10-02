@@ -20,6 +20,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app as app_module  # noqa: E402
+import db  # noqa: E402
 from app import get_connection  # noqa: E402
 
 # A project that only exists in the test database.
@@ -45,6 +46,19 @@ def guard_test_database():
         pytest.exit(
             "Refusing to run: the marker project was not found, so this does "
             "not look like the test database.", returncode=2)
+
+
+@pytest.fixture(scope='session', autouse=True)
+def close_connection_pool():
+    """Close the pooled connections once the whole run is over.
+
+    Every test borrows connections from the same pool the app uses: the
+    factory holds one for the length of a test, and each request takes its
+    own. Nothing is closed in between, so the sockets are shut here, at the
+    very end, instead of being left to the process exit.
+    """
+    yield
+    db.close_pool()
 
 
 class Factory:
