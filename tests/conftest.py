@@ -15,6 +15,7 @@ import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
+import flask
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -267,13 +268,20 @@ def render_context(monkeypatch):
     finished HTML, and it says plainly which value is wrong when a test fails.
     """
     store = RenderCapture()
-    original = app_module.render_template
+    original = flask.render_template
 
     def recording(template_name, *args, **kwargs):
         store.setdefault(template_name, []).append(kwargs)
         return original(template_name, *args, **kwargs)
 
-    monkeypatch.setattr(app_module, 'render_template', recording)
+    # The routes are spread over several modules, and each module holds its
+    # own reference to render_template, so every one of them is patched.
+    names = ['app', 'core'] + sorted(
+        name for name in sys.modules if name.startswith('routes.'))
+    for name in names:
+        module = sys.modules.get(name)
+        if module is not None and hasattr(module, 'render_template'):
+            monkeypatch.setattr(module, 'render_template', recording)
     return store
 
 
