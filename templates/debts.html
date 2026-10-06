@@ -1,12 +1,12 @@
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Borç Durumu ve Taksitler</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+{% extends 'base.html' %}
+{% block title %}Borç Durumu ve Taksitler{% endblock %}
+
+{# This page was built without static/style.css and never loaded it. That
+   file would turn the table headers purple and change the tables and the
+   inputs, so it stays out until the page is meant to share that look. #}
+{% block site_css %}{% endblock %}
+
+{% block extra_head %}
 <style>
         body { background-color: #f8f9fa; padding-top: 76px; }
         .card { border: none; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); transition: transform 0.2s ease-in-out; }
@@ -20,103 +20,13 @@
         /* Daha kompakt select görünümü */
         #projectSelect, #flatSelect { max-height: 42px; }
         #projectSelect option, #flatSelect option { padding: 8px 10px; }
-                #progress {
-        position: fixed;
-        bottom: 20px;
-        right: 10px;
-        height: 70px;
-        width: 70px;
-        display: none;
-        place-items: center;
-        border-radius: 50%;
-        box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
-        cursor: pointer;
-        }
-        #progress-value {
-        display: block;
-        height: calc(100% - 15px);
-        width: calc(100% - 15px);
-        background-color: #ffffff;
-        border-radius: 50%;
-        display: grid;
-        place-items: center;
-        font-size: 35px;
-        color: #001a2e;
-        }
-        html {
-            scroll-behavior: smooth;
-        }
     </style>
-</head>
-<body>
+{% endblock %}
 
-    <!-- Navbar -->
-<nav class="navbar navbar-expand-lg navbar-dark fixed-top shadow">
-    <div class="container">
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"><span class="navbar-toggler-icon"></span></button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav me-auto">
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><i class="fa-solid fa-home me-1"></i>Ana Sayfa</a>
-                </li>
-                <!-- <li class="nav-item mx-3"></li>
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_payment', 'list_payments', 'debt_status', 'select_project_for_expenses'] %}active{% endif %}" href="#" id="financialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="fa-solid fa-coins me-1"></i> Finansal
-                    </a>
-                    <ul class="dropdown-menu" aria-labelledby="financialDropdown">
-                        <li><a class="dropdown-item" href="{{ url_for('assign_flat_owner') }}">Daire Satış Kaydı</a></li>
-                        <li><a class="dropdown-item" href="{{ url_for('new_payment') }}">Yeni Gelir Kaydet</a></li>
-                    </ul>
-                </li> -->
+{# The page always used my-4, base.html uses my-5. #}
+{% block container_class %}container my-4{% endblock %}
 
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['new_payment', 'list_payments', 'assign_flat_owner', 'debt_status', 'select_project_for_expenses'] %}active{% endif %}" href="#" id="financialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="fa-solid fa-list me-1"></i> Muhasebe
-                    </a>
-                    <ul class="dropdown-menu" aria-labelledby="financialDropdown">
-                        <li><a class="dropdown-item" href="{{ url_for('assign_flat_owner') }}">Daire Satış Kaydı</a></li>
-                        <li><a class="dropdown-item" href="{{ url_for('debt_status') }}">Gelir Muhasebe İşlemleri</a></li>
-                        <li><a class="dropdown-item" href="{{ url_for('list_expenses') }}">Gider Muhasebe İşlemleri</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item" href="{{ url_for('list_checks') }}">Çek Takibi</a></li>
-                    </ul>
-                </li>
-                
-                <!--
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['list_customers'] %}active{% endif %}" href="#" id="adminDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="fa-solid fa-users-cog me-1"></i> Yönetim
-                    </a>
-                    <ul class="dropdown-menu" aria-labelledby="adminDropdown">
-                        <li><a class="dropdown-item" href="{{ url_for('list_customers') }}">Müşteriler</a></li>
-                    </ul>
-                </li>
-                -->
-
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['reports', 'select_project_for_coop_report'] %}active{% endif %}" href="#" id="reportsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fa-solid fa-chart-pie me-1"></i> Raporlar</a>
-                    <ul class="dropdown-menu" aria-labelledby="reportsDropdown">
-                        <li><a class="dropdown-item" href="{{ url_for('reports') }}">Proje Raporları</a></li>
-                        <li><a class="dropdown-item" href="{{ url_for('select_project_for_coop_report') }}">Kooperatif Aylık Raporu</a></li>
-                        </ul>
-                </li>
-                
-                <li>
-                    <a class="nav-link {% if request.endpoint in ['list_customers'] %}active{% endif %}" href="{{ url_for('list_customers') }}"><i class="fa-solid fa-users me-1"></i>Müşteriler</a>
-                </li>
-            </ul>
-            <div class="d-flex align-items-center">
-                {% if session.user_name %}
-                <span class="me-3 text-white"><i class="fa-solid fa-user me-1"></i>{{ session.user_name }}</span>
-                <a href="{{ url_for('logout') }}" class="btn btn-danger btn-sm"><i class="fa-solid fa-sign-out-alt me-1"></i>Çıkış</a>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-</nav>
-
-<div class="container my-4">
+{% block content %}
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="fw-bold"><i class="fa-solid fa-file-invoice-dollar me-2 text-primary"></i> Borç Defteri (Proje Bazlı)</h2>
         <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Ana Sayfaya Dön</a>
@@ -435,34 +345,10 @@
         </div>
         {% endfor %}
     </div>
-</div>
-<div id="progress">
-    <span id="progress-value">&#x1F815;</span>
-</div>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% endblock %}
+
+{% block scripts %}
 <script>
-        let calcScrollValue = () => {
-        let scrollProgress = document.getElementById("progress");
-        let progressValue = document.getElementById("progress-value");
-        let pos = document.documentElement.scrollTop;
-        let calcHeight =
-            document.documentElement.scrollHeight -
-            document.documentElement.clientHeight;
-        let scrollValue = Math.round((pos * 100) / calcHeight);
-        if (pos > 100) {
-            scrollProgress.style.display = "grid";
-        } else {
-            scrollProgress.style.display = "none";
-        }
-        scrollProgress.addEventListener("click", () => {
-            document.documentElement.scrollTop = 0;
-        });
-        scrollProgress.style.background = `conic-gradient(#03cc65 ${scrollValue}%, #d7d7d7 ${scrollValue}%)`;
-        };
-        window.onscroll = calcScrollValue;
-        window.onload = calcScrollValue;
-
-
         const projectSelect = document.getElementById('projectSelect');
         const flatSelect = document.getElementById('flatSelect');
         const flatIdField = document.getElementById('flat_id_field');
@@ -542,23 +428,5 @@
         if (projectSelect && projectSelect.value) {
             flatsPromise = loadFlats(projectSelect.value, flatIdField.value);
         }
-
-        document.getElementById('customerSearchInput').addEventListener('input', function() {
-            const searchTerm = this.value.toLowerCase().trim();
-            document.querySelectorAll('.project-container').forEach(container => {
-                let projectHasVisibleCard = false;
-                container.querySelectorAll('.customer-card').forEach(card => {
-                    const customerName = card.querySelector('.customer-name').textContent.toLowerCase();
-                    if (customerName.includes(searchTerm)) {
-                        card.style.display = '';
-                        projectHasVisibleCard = true;
-                    } else {
-                        card.style.display = 'none';
-                    }
-                });
-                container.style.display = projectHasVisibleCard ? '' : 'none';
-            });
-        });
     </script>
-</body>
-</html>
+{% endblock %}
