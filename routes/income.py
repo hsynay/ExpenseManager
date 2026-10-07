@@ -128,211 +128,230 @@ def assign_flat_owner():
 # GÜNCELLENMİŞ FONKSİYON: debt_status
 # app.py içindeki debt_status fonksiyonunu bulun ve güncelleyin
 
+def _load_debt_status(cur, project_filter, flat_filter, search_query):
+    """Everything the /debts page and its Excel export show.
+
+    Both read it from here, so the file always holds what the screen shows.
+    Returns a dict: projects_data, all_projects, selected_project_name and
+    selected_flat_desc.
+    """
+    projects_data = []
+    selected_project_name = None
+    selected_flat_desc = None
+
+    # Proje listesi (filtre datalisti için)
+    cur.execute("SELECT id, name FROM projects ORDER BY name")
+    all_projects = cur.fetchall()
+
+    # Adım 1: Daireleri çek
+    flats_sql = """
+        SELECT 
+            f.id, p.name, p.project_type, f.block_name, f.floor, f.flat_no,
+            c.first_name, c.last_name, f.total_price, p.id as project_id 
+        FROM flats f
+        JOIN projects p ON f.project_id = p.id
+        JOIN customers c ON f.owner_id = c.id
+        WHERE f.owner_id IS NOT NULL
+    """
+    flats_params = []
+    if project_filter:
+        flats_sql += " AND f.project_id = %s"
+        flats_params.append(project_filter)
+    if flat_filter:
+        flats_sql += " AND f.id = %s"
+        flats_params.append(flat_filter)
+    if search_query:
+        like = f"%{search_query}%"
+        flats_sql += (" AND (c.first_name ILIKE %s OR c.last_name ILIKE %s"
+                      " OR (c.first_name || ' ' || c.last_name) ILIKE %s)")
+        flats_params.extend([like, like, like])
+    flats_sql += " ORDER BY p.name, f.block_name, f.floor, f.flat_no"
+    cur.execute(flats_sql, tuple(flats_params))
+    owned_flats = cur.fetchall()
+
+    if project_filter:
+        cur.execute("SELECT name FROM projects WHERE id = %s", (project_filter,))
+        row = cur.fetchone()
+        selected_project_name = row[0] if row else None
+    if flat_filter:
+        cur.execute("SELECT block_name, floor, flat_no FROM flats WHERE id = %s", (flat_filter,))
+        row = cur.fetchone()
+        if row:
+            selected_flat_desc = f"Blok: {row[0] or 'N/A'}, Kat: {row[1]}, No: {row[2]}"
+
+    # Proje bazlı toplamlar (filtre olsa bile tamamını göstermek için)
+    cur.execute("""
+        SELECT f.project_id, COALESCE(SUM(f.total_price), 0)
+        FROM flats f
+        WHERE f.owner_id IS NOT NULL
+        GROUP BY f.project_id
+    """)
+    project_income_all = dict(cur.fetchall())
+
+    cur.execute("""
+        SELECT f.project_id, COALESCE(SUM(p.amount), 0) as total_paid
+        FROM payments p
+        JOIN flats f ON p.flat_id = f.id
+        LEFT JOIN checks c ON p.check_id = c.id
+        WHERE f.owner_id IS NOT NULL AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
+        GROUP BY f.project_id
+    """)
+    project_paid_all = dict(cur.fetchall())
+
+    # Adım 2: TÜM taksitleri çek ve TARİHE GÖRE (ve ID'ye göre) SIRALA
+    # *** DÜZELTME: ORDER BY kısmına ', id ASC' eklendi. Bu, karışıklığı önler. ***
+    inst_sql = """
+        SELECT flat_id, due_date, amount, is_paid, paid_amount, id 
+        FROM installment_schedule 
+    """
+    inst_params = []
+    if flat_filter:
+        inst_sql += " WHERE flat_id = %s"
+        inst_params.append(flat_filter)
+    elif project_filter:
+        inst_sql += " WHERE flat_id IN (SELECT id FROM flats WHERE project_id = %s AND owner_id IS NOT NULL)"
+        inst_params.append(project_filter)
+    inst_sql += " ORDER BY flat_id, due_date ASC, id ASC"
+    cur.execute(inst_sql, tuple(inst_params))
+    all_installments_raw = cur.fetchall()
+    installments_by_flat = {flat_id: list(group) for flat_id, group in groupby(all_installments_raw, key=lambda x: x[0])}
+
+    # Adım 3: Ödemeleri topla (Aynı kalıyor)
+    pay_sql = """
+        SELECT p.flat_id, COALESCE(SUM(p.amount), 0) as total_paid 
+        FROM payments p
+        LEFT JOIN checks c ON p.check_id = c.id
+        WHERE p.payment_method = 'nakit' OR c.status = 'tahsil_edildi'
+    """
+    pay_params = []
+    if flat_filter:
+        pay_sql += " AND p.flat_id = %s"
+        pay_params.append(flat_filter)
+    elif project_filter:
+        pay_sql += " AND p.flat_id IN (SELECT id FROM flats WHERE project_id = %s AND owner_id IS NOT NULL)"
+        pay_params.append(project_filter)
+    pay_sql += " GROUP BY p.flat_id"
+    cur.execute(pay_sql, tuple(pay_params))
+    total_payments_by_flat = dict(cur.fetchall())
+
+    # Adım 3.5: Ödeme geçmişini çek (Aynı kalıyor)
+    # Column order, read by index in the template. list_customers builds a
+    # similar list with the first two columns the other way round, so these
+    # two queries must never be copied between each other.
+    #   0 p.id            1 p.flat_id      2 p.payment_date  3 p.description
+    #   4 p.amount        5 p.payment_method
+    #   6 c.status        7 c.bank_name    8 c.check_number   9 c.due_date
+    #  10 p.check_id
+    pay_hist_sql = """
+        SELECT 
+            p.id, p.flat_id, p.payment_date, p.description, p.amount, p.payment_method,
+            c.status, c.bank_name, c.check_number, c.due_date, p.check_id
+        FROM payments p
+        LEFT JOIN checks c ON p.check_id = c.id
+    """
+    pay_hist_params = []
+    if flat_filter:
+        pay_hist_sql += " WHERE p.flat_id = %s"
+        pay_hist_params.append(flat_filter)
+    elif project_filter:
+        pay_hist_sql += " WHERE p.flat_id IN (SELECT id FROM flats WHERE project_id = %s AND owner_id IS NOT NULL)"
+        pay_hist_params.append(project_filter)
+    pay_hist_sql += " ORDER BY p.flat_id, p.payment_date DESC, p.id DESC"
+    cur.execute(pay_hist_sql, tuple(pay_hist_params))
+    payment_rows_id_first = cur.fetchall()
+    payments_by_flat = {flat_id: list(group) for flat_id, group in groupby(payment_rows_id_first, key=lambda x: x[1])}
+
+    # Adım 4: Verileri birleştir
+    flats_list = []
+    today = date.today()
+    for flat_id, project_name, project_type, block_name, floor, flat_no, first_name, last_name, total_price, project_id_val in owned_flats:
+        total_paid = total_payments_by_flat.get(flat_id, Decimal(0))
+        flat_dict = {
+            'flat_id': flat_id,
+            'project_id': project_id_val,
+            'project_name': project_name,
+            'project_type': project_type,
+            'customer_name': f"{first_name} {last_name}",
+            'flat_details': f"Blok: {block_name or 'N/A'}, Kat: {floor}, No: {flat_no}",
+            'total_paid': total_paid,
+            'flat_total_price': total_price or Decimal(0),
+            'remaining_debt': (total_price or Decimal(0)) - total_paid,
+            'installments': [],
+            'payments': payments_by_flat.get(flat_id, [])
+        }
+
+        if project_type == 'normal':
+            current_installments = installments_by_flat.get(flat_id, [])
+            for inst_flat_id, due_date, total_amount, is_paid, paid_amount, inst_id in current_installments:
+                paid_amount = paid_amount or Decimal(0)
+                status, css_class = ("Ödendi", "table-success") if is_paid else (f"Kısmen Ödendi", "table-warning") if paid_amount > 0 else ("Gecikmiş", "table-danger") if due_date < today else ("Bekleniyor", "table-light")
+                flat_dict['installments'].append({
+                    'id': inst_id, 'due_date': due_date, 'total_amount': total_amount, 
+                    'remaining_installment_due': total_amount - paid_amount,
+                    'status': status, 'css_class': css_class
+                })
+            # *** YENİ EKLENECEK SATIR ***
+            # Veritabanı sıralaması yetmezse, Python ile zorla tarihe göre sırala
+            flat_dict['installments'].sort(key=lambda x: x['due_date'])
+        flats_list.append(flat_dict)
+
+    # Adım 5: Gruplama (Aynı kalıyor)
+    for key_tuple, group in groupby(flats_list, key=lambda x: (x['project_id'], x['project_name'])):
+        group_list = list(group)
+        project_id_key, project_name_key = key_tuple
+
+        total_project_income = Decimal(project_income_all.get(project_id_key, 0))
+        total_project_paid = Decimal(project_paid_all.get(project_id_key, 0))
+        total_project_remaining = total_project_income - total_project_paid
+
+        projects_data.append({
+            'project_id': project_id_key,
+            'project_name': project_name_key,
+            'project_type': group_list[0]['project_type'],
+            'flats': group_list,
+            'total_project_income': total_project_income,
+            'total_project_paid': total_project_paid,
+            'total_project_remaining': total_project_remaining
+        })
+
+
+    return {
+        'projects_data': projects_data,
+        'all_projects': all_projects,
+        'selected_project_name': selected_project_name,
+        'selected_flat_desc': selected_flat_desc,
+    }
+
+
 @app.route('/debts')
 @login_required
 def debt_status():
     conn = get_connection()
     cur = conn.cursor()
-    projects_data = []
     project_filter = request.args.get('project_id', type=int)
     flat_filter = request.args.get('flat_id', type=int)
     search_query = (request.args.get('search') or '').strip()
-    selected_project_name = None
-    selected_flat_desc = None
 
     try:
-        # Proje listesi (filtre datalisti için)
-        cur.execute("SELECT id, name FROM projects ORDER BY name")
-        all_projects = cur.fetchall()
-
-        # Adım 1: Daireleri çek
-        flats_sql = """
-            SELECT 
-                f.id, p.name, p.project_type, f.block_name, f.floor, f.flat_no,
-                c.first_name, c.last_name, f.total_price, p.id as project_id 
-            FROM flats f
-            JOIN projects p ON f.project_id = p.id
-            JOIN customers c ON f.owner_id = c.id
-            WHERE f.owner_id IS NOT NULL
-        """
-        flats_params = []
-        if project_filter:
-            flats_sql += " AND f.project_id = %s"
-            flats_params.append(project_filter)
-        if flat_filter:
-            flats_sql += " AND f.id = %s"
-            flats_params.append(flat_filter)
-        if search_query:
-            like = f"%{search_query}%"
-            flats_sql += (" AND (c.first_name ILIKE %s OR c.last_name ILIKE %s"
-                          " OR (c.first_name || ' ' || c.last_name) ILIKE %s)")
-            flats_params.extend([like, like, like])
-        flats_sql += " ORDER BY p.name, f.block_name, f.floor, f.flat_no"
-        cur.execute(flats_sql, tuple(flats_params))
-        owned_flats = cur.fetchall()
-
-        if project_filter:
-            cur.execute("SELECT name FROM projects WHERE id = %s", (project_filter,))
-            row = cur.fetchone()
-            selected_project_name = row[0] if row else None
-        if flat_filter:
-            cur.execute("SELECT block_name, floor, flat_no FROM flats WHERE id = %s", (flat_filter,))
-            row = cur.fetchone()
-            if row:
-                selected_flat_desc = f"Blok: {row[0] or 'N/A'}, Kat: {row[1]}, No: {row[2]}"
-
-        # Proje bazlı toplamlar (filtre olsa bile tamamını göstermek için)
-        cur.execute("""
-            SELECT f.project_id, COALESCE(SUM(f.total_price), 0)
-            FROM flats f
-            WHERE f.owner_id IS NOT NULL
-            GROUP BY f.project_id
-        """)
-        project_income_all = dict(cur.fetchall())
-
-        cur.execute("""
-            SELECT f.project_id, COALESCE(SUM(p.amount), 0) as total_paid
-            FROM payments p
-            JOIN flats f ON p.flat_id = f.id
-            LEFT JOIN checks c ON p.check_id = c.id
-            WHERE f.owner_id IS NOT NULL AND (p.payment_method = 'nakit' OR c.status = 'tahsil_edildi')
-            GROUP BY f.project_id
-        """)
-        project_paid_all = dict(cur.fetchall())
-
-        # Adım 2: TÜM taksitleri çek ve TARİHE GÖRE (ve ID'ye göre) SIRALA
-        # *** DÜZELTME: ORDER BY kısmına ', id ASC' eklendi. Bu, karışıklığı önler. ***
-        inst_sql = """
-            SELECT flat_id, due_date, amount, is_paid, paid_amount, id 
-            FROM installment_schedule 
-        """
-        inst_params = []
-        if flat_filter:
-            inst_sql += " WHERE flat_id = %s"
-            inst_params.append(flat_filter)
-        elif project_filter:
-            inst_sql += " WHERE flat_id IN (SELECT id FROM flats WHERE project_id = %s AND owner_id IS NOT NULL)"
-            inst_params.append(project_filter)
-        inst_sql += " ORDER BY flat_id, due_date ASC, id ASC"
-        cur.execute(inst_sql, tuple(inst_params))
-        all_installments_raw = cur.fetchall()
-        installments_by_flat = {flat_id: list(group) for flat_id, group in groupby(all_installments_raw, key=lambda x: x[0])}
-
-        # Adım 3: Ödemeleri topla (Aynı kalıyor)
-        pay_sql = """
-            SELECT p.flat_id, COALESCE(SUM(p.amount), 0) as total_paid 
-            FROM payments p
-            LEFT JOIN checks c ON p.check_id = c.id
-            WHERE p.payment_method = 'nakit' OR c.status = 'tahsil_edildi'
-        """
-        pay_params = []
-        if flat_filter:
-            pay_sql += " AND p.flat_id = %s"
-            pay_params.append(flat_filter)
-        elif project_filter:
-            pay_sql += " AND p.flat_id IN (SELECT id FROM flats WHERE project_id = %s AND owner_id IS NOT NULL)"
-            pay_params.append(project_filter)
-        pay_sql += " GROUP BY p.flat_id"
-        cur.execute(pay_sql, tuple(pay_params))
-        total_payments_by_flat = dict(cur.fetchall())
-
-        # Adım 3.5: Ödeme geçmişini çek (Aynı kalıyor)
-        # Column order, read by index in the template. list_customers builds a
-        # similar list with the first two columns the other way round, so these
-        # two queries must never be copied between each other.
-        #   0 p.id            1 p.flat_id      2 p.payment_date  3 p.description
-        #   4 p.amount        5 p.payment_method
-        #   6 c.status        7 c.bank_name    8 c.check_number   9 c.due_date
-        #  10 p.check_id
-        pay_hist_sql = """
-            SELECT 
-                p.id, p.flat_id, p.payment_date, p.description, p.amount, p.payment_method,
-                c.status, c.bank_name, c.check_number, c.due_date, p.check_id
-            FROM payments p
-            LEFT JOIN checks c ON p.check_id = c.id
-        """
-        pay_hist_params = []
-        if flat_filter:
-            pay_hist_sql += " WHERE p.flat_id = %s"
-            pay_hist_params.append(flat_filter)
-        elif project_filter:
-            pay_hist_sql += " WHERE p.flat_id IN (SELECT id FROM flats WHERE project_id = %s AND owner_id IS NOT NULL)"
-            pay_hist_params.append(project_filter)
-        pay_hist_sql += " ORDER BY p.flat_id, p.payment_date DESC, p.id DESC"
-        cur.execute(pay_hist_sql, tuple(pay_hist_params))
-        payment_rows_id_first = cur.fetchall()
-        payments_by_flat = {flat_id: list(group) for flat_id, group in groupby(payment_rows_id_first, key=lambda x: x[1])}
-
-        # Adım 4: Verileri birleştir
-        flats_list = []
-        today = date.today()
-        for flat_id, project_name, project_type, block_name, floor, flat_no, first_name, last_name, total_price, project_id_val in owned_flats:
-            total_paid = total_payments_by_flat.get(flat_id, Decimal(0))
-            flat_dict = {
-                'flat_id': flat_id,
-                'project_id': project_id_val,
-                'project_name': project_name,
-                'project_type': project_type,
-                'customer_name': f"{first_name} {last_name}",
-                'flat_details': f"Blok: {block_name or 'N/A'}, Kat: {floor}, No: {flat_no}",
-                'total_paid': total_paid,
-                'flat_total_price': total_price or Decimal(0),
-                'remaining_debt': (total_price or Decimal(0)) - total_paid,
-                'installments': [],
-                'payments': payments_by_flat.get(flat_id, [])
-            }
-            
-            if project_type == 'normal':
-                current_installments = installments_by_flat.get(flat_id, [])
-                for inst_flat_id, due_date, total_amount, is_paid, paid_amount, inst_id in current_installments:
-                    paid_amount = paid_amount or Decimal(0)
-                    status, css_class = ("Ödendi", "table-success") if is_paid else (f"Kısmen Ödendi", "table-warning") if paid_amount > 0 else ("Gecikmiş", "table-danger") if due_date < today else ("Bekleniyor", "table-light")
-                    flat_dict['installments'].append({
-                        'id': inst_id, 'due_date': due_date, 'total_amount': total_amount, 
-                        'remaining_installment_due': total_amount - paid_amount,
-                        'status': status, 'css_class': css_class
-                    })
-                # *** YENİ EKLENECEK SATIR ***
-                # Veritabanı sıralaması yetmezse, Python ile zorla tarihe göre sırala
-                flat_dict['installments'].sort(key=lambda x: x['due_date'])
-            flats_list.append(flat_dict)
-
-        # Adım 5: Gruplama (Aynı kalıyor)
-        for key_tuple, group in groupby(flats_list, key=lambda x: (x['project_id'], x['project_name'])):
-            group_list = list(group)
-            project_id_key, project_name_key = key_tuple
-            
-            total_project_income = Decimal(project_income_all.get(project_id_key, 0))
-            total_project_paid = Decimal(project_paid_all.get(project_id_key, 0))
-            total_project_remaining = total_project_income - total_project_paid
-
-            projects_data.append({
-                'project_id': project_id_key,
-                'project_name': project_name_key,
-                'project_type': group_list[0]['project_type'],
-                'flats': group_list,
-                'total_project_income': total_project_income,
-                'total_project_paid': total_project_paid,
-                'total_project_remaining': total_project_remaining
-            })
-
+        data = _load_debt_status(cur, project_filter, flat_filter,
+                                 search_query)
     except Exception:
         app.logger.exception('Failed to build the debt status page')
         flash('Borç durumu sayfası yüklenirken bir hata oluştu. Liste eksik '
               'olabilir.', 'danger')
-        projects_data = []
-        all_projects = []
+        data = {'projects_data': [], 'all_projects': [],
+                'selected_project_name': None, 'selected_flat_desc': None}
     finally:
         cur.close()
         conn.close()
 
     return render_template('debts.html',
-                           projects_data=projects_data,
-                           all_projects=all_projects,
+                           projects_data=data['projects_data'],
+                           all_projects=data['all_projects'],
                            selected_project_id=project_filter,
-                           selected_project_name=selected_project_name,
+                           selected_project_name=data['selected_project_name'],
                            selected_flat_id=flat_filter,
-                           selected_flat_desc=selected_flat_desc,
+                           selected_flat_desc=data['selected_flat_desc'],
                            user_name=session.get('user_name'))
 
 @app.route('/delete_flat_owner_data', methods=['POST'])
@@ -756,26 +775,33 @@ def print_debt_statement(flat_id):
 
 # list_payments fonksiyonu
 
-@app.route('/payments')
-@login_required
-def list_payments():
-    # Filtreleme parametreleri
-    project = request.args.get('project')
-    start = request.args.get('start_date')
-    end = request.args.get('end_date')
-    customer_id = request.args.get('customer_id')
-    search = (request.args.get('search') or '').strip()
-    
-    # Sıralama parametreleri
-    sort_by = request.args.get('sort_by', 'tarih')
-    order = request.args.get('order', 'desc')
-    
+def _payments_sort(args):
+    """(sort_by, order, SQL column) for the /payments list."""
+    sort_by = args.get('sort_by', 'tarih')
+    order = args.get('order', 'desc')
+
     sortable_columns = {
         'proje': 'pr.name', 'musteri': 'c.last_name',
         'tarih': 'p.payment_date', 'tutar': 'p.amount'
     }
     order_by_column = sortable_columns.get(sort_by, 'p.payment_date')
     if order not in ['asc', 'desc']: order = 'desc'
+    return sort_by, order, order_by_column
+
+
+def _payments_query(args):
+    """The /payments query with its filters and sort order, but no paging.
+
+    The list page adds LIMIT/OFFSET to it. The Excel export runs it as it is.
+    Both build their SQL here, so a filter can never mean something different
+    on the screen and in the file.
+    """
+    project = args.get('project')
+    start = args.get('start_date')
+    end = args.get('end_date')
+    customer_id = args.get('customer_id')
+    search = (args.get('search') or '').strip()
+    _, order, order_by_column = _payments_sort(args)
 
     sql = """
         SELECT p.id, pr.name, c.first_name, c.last_name, f.flat_no, f.floor,
@@ -811,6 +837,22 @@ def list_payments():
         sql += " WHERE " + " AND ".join(filters)
 
     sql += f" ORDER BY {order_by_column} {order.upper()}"
+    return sql, params
+
+
+@app.route('/payments')
+@login_required
+def list_payments():
+    # Filtreleme parametreleri
+    project = request.args.get('project')
+    start = request.args.get('start_date')
+    end = request.args.get('end_date')
+    customer_id = request.args.get('customer_id')
+
+    # Sıralama parametreleri
+    sort_by, order, _ = _payments_sort(request.args)
+
+    sql, params = _payments_query(request.args)
 
     page = get_page_number()
     limit, offset = page_window(page)
