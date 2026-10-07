@@ -16,12 +16,14 @@ psycopg2-binary==2.9.12
 python-dotenv==1.2.2
 python-dateutil==2.9.0.post0
 gunicorn==26.0.0
+openpyxl==3.1.5
 
 # --- Pulled in by the packages above (pinned for reproducible builds) ---
 blinker==1.9.0
 click==8.4.1
 colorama==0.4.6
 Deprecated==1.3.1
+et_xmlfile==2.0.0
 itsdangerous==2.2.0
 Jinja2==3.1.6
 limits==5.8.0
