@@ -16,6 +16,113 @@ from helpers import (
 from reconcile import reconcile_supplier_payments
 
 
+def _expense_children(cur, project_id):
+    """The payments and the installment plans of every expense of a project.
+
+    Returns two dicts keyed by expense id: (payments, schedules).
+    """
+    cur.execute("""
+        SELECT sp.expense_id, sp.id, sp.payment_date, sp.description, sp.amount, sp.payment_method,
+               sp.check_id, oc.status, oc.check_number, oc.due_date, oc.bank_name
+        FROM supplier_payments sp
+        LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
+        WHERE sp.expense_id IN (SELECT id FROM expenses WHERE project_id = %s)
+        ORDER BY sp.expense_id, sp.payment_date DESC, sp.id DESC
+    """, (project_id,))
+    payments_by_expense = {k: list(v) for k, v in groupby(cur.fetchall(), key=lambda x: x[0])}
+
+    cur.execute("""
+        SELECT expense_id, due_date, amount, is_paid, paid_amount, id as installment_id
+        FROM expense_schedule
+        WHERE expense_id IN (SELECT id FROM expenses WHERE project_id = %s)
+        ORDER BY expense_id, due_date ASC
+    """, (project_id,))
+    schedules_by_expense = {k: list(v) for k, v in groupby(cur.fetchall(), key=lambda x: x[0])}
+    return payments_by_expense, schedules_by_expense
+
+
+def _large_expenses(cur, project_id, supplier_id_str, title_filter,
+                    limit=None, offset=0):
+    """The big (planned) expenses of a project that match the filters.
+
+    The page passes limit and offset to get one page. The Excel export leaves
+    them out and gets every matching row.
+    """
+    expenses_sql = """
+        SELECT e.id, e.title, e.amount, s.name as supplier_name, e.supplier_id
+        FROM expenses e
+        LEFT JOIN suppliers s ON e.supplier_id = s.id
+        WHERE e.project_id = %s
+    """
+    expenses_params = [project_id]
+    if supplier_id_str:
+        expenses_sql += " AND e.supplier_id = %s"
+        expenses_params.append(int(supplier_id_str))
+    if title_filter:
+        expenses_sql += " AND e.title ILIKE %s"
+        expenses_params.append(f"%{title_filter}%")
+    expenses_sql += " ORDER BY e.id DESC"
+    if limit is not None:
+        expenses_sql += " LIMIT %s OFFSET %s"
+        expenses_params.extend([limit, offset])
+    cur.execute(expenses_sql, tuple(expenses_params))
+    return cur.fetchall()
+
+
+def _petty_items(cur, project_id, title_filter, pc_sort, pc_order):
+    """Every petty cash row of a project that matches the title, sorted.
+
+    Sorting happens in Python, so this always returns the whole list and the
+    caller cuts the page out of it.
+    """
+    petty_sql = """
+        SELECT id, title, amount, expense_date, description
+        FROM petty_cash_expenses
+        WHERE project_id = %s
+    """
+    petty_params = [project_id]
+    if title_filter:
+        petty_sql += " AND title ILIKE %s"
+        petty_params.append(f"%{title_filter}%")
+
+    cur.execute(petty_sql, tuple(petty_params))
+    raw_petty = cur.fetchall()
+
+    # Python ile kesin sıralama
+    is_reverse = (pc_order == 'desc')
+    if pc_sort == 'amount':
+        return sorted(raw_petty, key=lambda x: (x[2], x[3], x[0]), reverse=is_reverse)
+    return sorted(raw_petty, key=lambda x: (x[3], x[0]), reverse=is_reverse)
+
+
+def _build_expense_cards(expenses_raw, schedules_by_expense, payments_by_expense):
+    """One dict per expense with its installments, status labels and payments."""
+    expenses_data = []
+    today = date.today()
+    for expense_id_loop, title, total_amount, supplier_name, _supplier_id in expenses_raw:
+        schedule = schedules_by_expense.get(expense_id_loop, [])
+        total_paid_for_this_expense = sum(item[4] for item in schedule if item[4])
+        expense_dict = {
+            'expense_id': expense_id_loop, 'title': title, 'supplier_name': supplier_name or "-",
+            'total_amount': total_amount, 'total_paid': total_paid_for_this_expense,
+            'remaining_due': total_amount - total_paid_for_this_expense,
+            'installments': [],
+            'payments': payments_by_expense.get(expense_id_loop, [])
+        }
+        for _, due_date, inst_amount, is_paid, paid_amount, inst_id in schedule:
+            paid_amount = paid_amount or Decimal(0)
+            status, css_class = ("Ödendi", "table-success") if is_paid else ("Kısmen Ödendi", "table-warning") if paid_amount > 0 else ("Gecikmiş", "table-danger") if due_date < today else ("Bekleniyor", "table-light")
+            expense_dict['installments'].append({
+                'id': inst_id, 'due_date': due_date, 'total_amount': inst_amount,
+                'remaining_installment_due': inst_amount - paid_amount,
+                'status': status, 'css_class': css_class, 'is_paid': is_paid
+            })
+
+        expense_dict['installments'].sort(key=lambda x: x['due_date'])
+        expenses_data.append(expense_dict)
+    return expenses_data
+
+
 @app.route('/expenses', methods=['GET'])
 @login_required
 def list_expenses():
@@ -85,23 +192,8 @@ def list_expenses():
         cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
         project_name = cur.fetchone()[0]
 
-        cur.execute("""
-            SELECT sp.expense_id, sp.id, sp.payment_date, sp.description, sp.amount, sp.payment_method,
-                   sp.check_id, oc.status, oc.check_number, oc.due_date, oc.bank_name
-            FROM supplier_payments sp
-            LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
-            WHERE sp.expense_id IN (SELECT id FROM expenses WHERE project_id = %s)
-            ORDER BY sp.expense_id, sp.payment_date DESC, sp.id DESC
-        """, (project_id,))
-        payments_by_expense = {k: list(v) for k, v in groupby(cur.fetchall(), key=lambda x: x[0])}
-
-        cur.execute("""
-            SELECT expense_id, due_date, amount, is_paid, paid_amount, id as installment_id
-            FROM expense_schedule
-            WHERE expense_id IN (SELECT id FROM expenses WHERE project_id = %s)
-            ORDER BY expense_id, due_date ASC
-        """, (project_id,))
-        schedules_by_expense = {k: list(v) for k, v in groupby(cur.fetchall(), key=lambda x: x[0])}
+        payments_by_expense, schedules_by_expense = _expense_children(
+            cur, project_id)
 
         # Filtre listeleri
         cur.execute("""
@@ -121,47 +213,15 @@ def list_expenses():
         # Büyük giderler
         expenses_raw = []
         if expense_type in ('all', 'large'):
-            expenses_sql = """
-                SELECT e.id, e.title, e.amount, s.name as supplier_name, e.supplier_id
-                FROM expenses e
-                LEFT JOIN suppliers s ON e.supplier_id = s.id
-                WHERE e.project_id = %s
-            """
-            expenses_params = [project_id]
-            if supplier_id_str:
-                expenses_sql += " AND e.supplier_id = %s"
-                expenses_params.append(int(supplier_id_str))
-            if title_filter:
-                expenses_sql += " AND e.title ILIKE %s"
-                expenses_params.append(f"%{title_filter}%")
-            expenses_sql += " ORDER BY e.id DESC"
             large_limit, large_offset = page_window(page)
-            expenses_sql += " LIMIT %s OFFSET %s"
-            expenses_params.extend([large_limit, large_offset])
-            cur.execute(expenses_sql, tuple(expenses_params))
-            expenses_raw, expenses_pager = split_page(cur.fetchall(), page)
+            expenses_raw, expenses_pager = split_page(
+                _large_expenses(cur, project_id, supplier_id_str, title_filter,
+                                limit=large_limit, offset=large_offset), page)
 
         # Küçük giderler
         if expense_type in ('all', 'petty'):
-            petty_sql = """
-                SELECT id, title, amount, expense_date, description
-                FROM petty_cash_expenses
-                WHERE project_id = %s
-            """
-            petty_params = [project_id]
-            if title_filter:
-                petty_sql += " AND title ILIKE %s"
-                petty_params.append(f"%{title_filter}%")
-            
-            cur.execute(petty_sql, tuple(petty_params))
-            raw_petty = cur.fetchall()
-
-            # Python ile kesin sıralama
-            is_reverse = (pc_order == 'desc')
-            if pc_sort == 'amount':
-                petty_sorted = sorted(raw_petty, key=lambda x: (x[2], x[3], x[0]), reverse=is_reverse)
-            else:
-                petty_sorted = sorted(raw_petty, key=lambda x: (x[3], x[0]), reverse=is_reverse)
+            petty_sorted = _petty_items(cur, project_id, title_filter,
+                                        pc_sort, pc_order)
 
             # The total belongs to the whole list, so read it before cutting
             # the page out. Sorting happens here rather than in SQL, so the
@@ -192,29 +252,9 @@ def list_expenses():
         total_paid_project = (total_paid_scheduled or Decimal(0)) + (total_petty_cash or Decimal(0))
         total_remaining_due = total_project_expense - total_paid_project
 
-        today = date.today()
-        for expense_id_loop, title, total_amount, supplier_name, _supplier_id in expenses_raw:
-            schedule = schedules_by_expense.get(expense_id_loop, [])
-            total_paid_for_this_expense = sum(item[4] for item in schedule if item[4])
-            expense_dict = {
-                'expense_id': expense_id_loop, 'title': title, 'supplier_name': supplier_name or "-",
-                'total_amount': total_amount, 'total_paid': total_paid_for_this_expense,
-                'remaining_due': total_amount - total_paid_for_this_expense, 
-                'installments': [],
-                'payments': payments_by_expense.get(expense_id_loop, [])
-            }
-            for _, due_date, inst_amount, is_paid, paid_amount, inst_id in schedule:
-                paid_amount = paid_amount or Decimal(0)
-                status, css_class = ("Ödendi", "table-success") if is_paid else ("Kısmen Ödendi", "table-warning") if paid_amount > 0 else ("Gecikmiş", "table-danger") if due_date < today else ("Bekleniyor", "table-light")
-                expense_dict['installments'].append({
-                    'id': inst_id, 'due_date': due_date, 'total_amount': inst_amount,
-                    'remaining_installment_due': inst_amount - paid_amount,
-                    'status': status, 'css_class': css_class, 'is_paid': is_paid
-                })
-            
-            expense_dict['installments'].sort(key=lambda x: x['due_date'])
-            expenses_data.append(expense_dict)
-            
+        expenses_data = _build_expense_cards(
+            expenses_raw, schedules_by_expense, payments_by_expense)
+
     except Exception:
         app.logger.exception('Failed to list expenses (project_id=%s)',
                              project_id_str)

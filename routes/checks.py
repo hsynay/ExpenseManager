@@ -11,6 +11,74 @@ from helpers import (
 from reconcile import reconcile_supplier_payments, reconcile_customer_payments
 
 
+def _incoming_checks_query(args):
+    """The filtered incoming checks query, without paging.
+
+    The /checks page adds LIMIT/OFFSET to it; the Excel export runs it as it
+    is. A bad date raises ValueError, as it always did on this page.
+    """
+    in_due_from = args.get('in_due_from')
+    in_due_to = args.get('in_due_to')
+    in_customer = args.get('in_customer', '').strip()
+    in_status = args.get('in_status', 'all')
+
+    in_params = []
+    in_sql = """
+        SELECT
+            c.id, c.due_date, c.amount, cus.first_name || ' ' || cus.last_name AS customer_name,
+            c.bank_name, c.check_number, c.status
+        FROM checks c
+        LEFT JOIN customers cus ON c.customer_id = cus.id
+        WHERE 1=1
+    """
+    if in_due_from:
+        in_sql += " AND c.due_date >= %s"
+        in_params.append(datetime.strptime(in_due_from, '%Y-%m-%d').date())
+    if in_due_to:
+        in_sql += " AND c.due_date <= %s"
+        in_params.append(datetime.strptime(in_due_to, '%Y-%m-%d').date())
+    if in_customer:
+        in_sql += " AND (cus.first_name || ' ' || cus.last_name) ILIKE %s"
+        in_params.append(f"%{in_customer}%")
+    if in_status != 'all':
+        in_sql += " AND c.status = %s"
+        in_params.append(in_status)
+    in_sql += " ORDER BY c.due_date ASC"
+    return in_sql, in_params
+
+
+def _outgoing_checks_query(args):
+    """The filtered outgoing checks query, without paging. Same idea as above."""
+    out_due_from = args.get('out_due_from')
+    out_due_to = args.get('out_due_to')
+    out_supplier = args.get('out_supplier', '').strip()
+    out_status = args.get('out_status', 'all')
+
+    out_params = []
+    out_sql = """
+        SELECT
+            oc.id, oc.due_date, oc.amount, s.name AS supplier_name,
+            oc.bank_name, oc.check_number, oc.status
+        FROM outgoing_checks oc
+        LEFT JOIN suppliers s ON oc.supplier_id = s.id
+        WHERE 1=1
+    """
+    if out_due_from:
+        out_sql += " AND oc.due_date >= %s"
+        out_params.append(datetime.strptime(out_due_from, '%Y-%m-%d').date())
+    if out_due_to:
+        out_sql += " AND oc.due_date <= %s"
+        out_params.append(datetime.strptime(out_due_to, '%Y-%m-%d').date())
+    if out_supplier:
+        out_sql += " AND s.name ILIKE %s"
+        out_params.append(f"%{out_supplier}%")
+    if out_status != 'all':
+        out_sql += " AND oc.status = %s"
+        out_params.append(out_status)
+    out_sql += " ORDER BY oc.due_date ASC"
+    return out_sql, out_params
+
+
 @app.route('/checks')
 @login_required
 def list_checks():
@@ -63,28 +131,7 @@ def list_checks():
         incoming_parties = sorted({c[3] for c in incoming_all if c[3]})
 
         # Filtreli alınan çekler
-        in_params = []
-        in_sql = """
-            SELECT 
-                c.id, c.due_date, c.amount, cus.first_name || ' ' || cus.last_name AS customer_name,
-                c.bank_name, c.check_number, c.status
-            FROM checks c
-            LEFT JOIN customers cus ON c.customer_id = cus.id
-            WHERE 1=1
-        """
-        if in_due_from:
-            in_sql += " AND c.due_date >= %s"
-            in_params.append(datetime.strptime(in_due_from, '%Y-%m-%d').date())
-        if in_due_to:
-            in_sql += " AND c.due_date <= %s"
-            in_params.append(datetime.strptime(in_due_to, '%Y-%m-%d').date())
-        if in_customer:
-            in_sql += " AND (cus.first_name || ' ' || cus.last_name) ILIKE %s"
-            in_params.append(f"%{in_customer}%")
-        if in_status != 'all':
-            in_sql += " AND c.status = %s"
-            in_params.append(in_status)
-        in_sql += " ORDER BY c.due_date ASC"
+        in_sql, in_params = _incoming_checks_query(request.args)
         in_limit, in_offset = page_window(in_page)
         in_sql += " LIMIT %s OFFSET %s"
         in_params.extend([in_limit, in_offset])
@@ -109,28 +156,7 @@ def list_checks():
                 total_outgoing_paid += check[2]
         outgoing_parties = sorted({c[3] for c in outgoing_all if c[3]})
 
-        out_params = []
-        out_sql = """
-            SELECT 
-                oc.id, oc.due_date, oc.amount, s.name AS supplier_name,
-                oc.bank_name, oc.check_number, oc.status
-            FROM outgoing_checks oc
-            LEFT JOIN suppliers s ON oc.supplier_id = s.id
-            WHERE 1=1
-        """
-        if out_due_from:
-            out_sql += " AND oc.due_date >= %s"
-            out_params.append(datetime.strptime(out_due_from, '%Y-%m-%d').date())
-        if out_due_to:
-            out_sql += " AND oc.due_date <= %s"
-            out_params.append(datetime.strptime(out_due_to, '%Y-%m-%d').date())
-        if out_supplier:
-            out_sql += " AND s.name ILIKE %s"
-            out_params.append(f"%{out_supplier}%")
-        if out_status != 'all':
-            out_sql += " AND oc.status = %s"
-            out_params.append(out_status)
-        out_sql += " ORDER BY oc.due_date ASC"
+        out_sql, out_params = _outgoing_checks_query(request.args)
         out_limit, out_offset = page_window(out_page)
         out_sql += " LIMIT %s OFFSET %s"
         out_params.extend([out_limit, out_offset])
