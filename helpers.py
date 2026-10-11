@@ -1,7 +1,8 @@
 """Small helpers shared by the routes: input checks, number format, audit
 log, double submit tokens, paging, safe redirects and the login guards."""
 from flask import request, redirect, url_for, session, jsonify
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import json
 from decimal import Decimal
 import uuid
@@ -9,6 +10,17 @@ from functools import wraps
 from urllib.parse import urlsplit, urlunsplit
 import random
 from core import app
+
+
+# The server (Render) runs on UTC. Between 00:00 and 03:00 in Istanbul the UTC
+# date is still yesterday, so anything that shows or compares "today" for the
+# user must ask for the Istanbul date instead of date.today().
+ISTANBUL = ZoneInfo('Europe/Istanbul')
+
+
+def today_istanbul(now=None):
+    """Today's date in Istanbul. `now` is for tests: any aware datetime."""
+    return (now or datetime.now(timezone.utc)).astimezone(ISTANBUL).date()
 
 
 class ValidationError(ValueError):

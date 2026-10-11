@@ -17,6 +17,7 @@ python-dotenv==1.2.2
 python-dateutil==2.9.0.post0
 gunicorn==26.0.0
 openpyxl==3.1.5
+tzdata==2026.5
 
 # --- Pulled in by the packages above (pinned for reproducible builds) ---
 blinker==1.9.0
