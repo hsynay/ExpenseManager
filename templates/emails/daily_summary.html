@@ -1,61 +1,157 @@
 <!doctype html>
 <html lang="tr">
-<body style="margin:0;padding:16px;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#212529;">
-<div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:8px;padding:20px;">
-
-  <h2 style="margin:0 0 4px 0;">Günlük Özet</h2>
-  <p style="margin:0 0 16px 0;color:#6c757d;">{{ s.today.strftime('%d.%m.%Y') }}</p>
-
-  {% for block, title in ((s.due_today, 'Bugün vadesi gelen çekler'), (s.due_tomorrow, 'Yarın vadesi gelen çekler')) %}
-  <h3 style="margin:20px 0 6px 0;font-size:16px;">{{ title }} ({{ block.day.strftime('%d.%m.%Y') }})</h3>
-  {% if block.checks %}
-  <table style="width:100%;border-collapse:collapse;font-size:14px;">
-    <tr style="background:#e9ecef;text-align:left;">
-      <th style="padding:6px;">Tip</th><th style="padding:6px;">Kişi / Firma</th><th style="padding:6px;">Proje</th><th style="padding:6px;text-align:right;">Tutar</th>
-    </tr>
-    {% for c in block.checks %}
-    <tr style="border-bottom:1px solid #dee2e6;">
-      <td style="padding:6px;">{{ 'Alınan' if c.kind == 'in' else 'Verilen' }}</td>
-      <td style="padding:6px;">{{ c.party or '-' }}</td>
-      <td style="padding:6px;">{{ c.project_name or '-' }}</td>
-      <td style="padding:6px;text-align:right;">{{ c.amount|thousands }} ₺</td>
-    </tr>
-    {% endfor %}
-  </table>
-  <p style="margin:6px 0 0 0;font-size:14px;">Girecek: <strong>{{ block.incoming|thousands }} ₺</strong> &nbsp;|&nbsp; Çıkacak: <strong>{{ block.outgoing|thousands }} ₺</strong></p>
-  {% else %}
-  <p style="margin:0;color:#6c757d;">Vadesi gelen çek yok.</p>
-  {% endif %}
-  {% endfor %}
-
-  <h3 style="margin:24px 0 6px 0;font-size:16px;">Vadesi geçmiş taksitler</h3>
-  {% if s.late_customers %}
-  <p style="margin:0;font-size:14px;">Toplam <strong style="color:#dc3545;">{{ s.late_total|thousands }} ₺</strong>,
-    {{ s.late_customers }} müşteri, en eski gecikme {{ s.late_oldest_days }} gün.
-    <a href="{{ site }}/overdue">Gecikme raporu</a></p>
-  {% else %}
-  <p style="margin:0;color:#6c757d;">Vadesi geçmiş taksit yok.</p>
-  {% endif %}
-
-  <h3 style="margin:24px 0 6px 0;font-size:16px;">Önümüzdeki {{ s.weeks }} hafta nakit durumu</h3>
-  <table style="width:100%;border-collapse:collapse;font-size:14px;">
-    <tr style="background:#e9ecef;text-align:left;">
-      <th style="padding:6px;">Hafta</th><th style="padding:6px;text-align:right;">Giriş</th><th style="padding:6px;text-align:right;">Çıkış</th><th style="padding:6px;text-align:right;">Kümülatif</th>
-    </tr>
-    {% for w in s.cash.weeks %}
-    <tr style="border-bottom:1px solid #dee2e6;{% if w.negative %}background:#f8d7da;{% endif %}">
-      <td style="padding:6px;">{{ w.label }}</td>
-      <td style="padding:6px;text-align:right;">{{ w.incoming|thousands }} ₺</td>
-      <td style="padding:6px;text-align:right;">{{ w.outgoing|thousands }} ₺</td>
-      <td style="padding:6px;text-align:right;font-weight:bold;{% if w.negative %}color:#dc3545;{% endif %}">{{ w.cumulative|thousands }} ₺</td>
-    </tr>
-    {% endfor %}
-  </table>
-  <p style="margin:6px 0 0 0;font-size:14px;">Net: <strong>{{ s.cash.total_net|thousands }} ₺</strong>
-    {% if s.cash.first_negative %}<span style="color:#dc3545;"> – kümülatif {{ s.cash.negative_count }} hafta eksiye düşüyor (ilk: {{ s.cash.first_negative.label }}).</span>{% endif %}
-    <a href="{{ site }}/cashflow">Nakit akışı</a></p>
-  <p style="margin:6px 0 0 0;font-size:12px;color:#6c757d;">Portföydeki çekler vade tarihinde beklenen para sayılır; bu bir tahmindir, borç kapatmaz. Karşılıksız çekler dahil değildir.</p>
-
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<title>Günlük Özet</title>
+</head>
+{#- Mail clients ignore modern CSS, so this page is built from tables with
+    inline styles only. Every colour is repeated as a bgcolor attribute where
+    Outlook needs it. Margins are replaced by spacer rows. The blocks below are
+    macros so the two check tables and the buttons stay identical. -#}
+{% macro button(url, label) -%}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:12px 0 0 0;">
+  <tr>
+    <td bgcolor="#667eea" style="background-color:#667eea;border-radius:6px;">
+      <a href="{{ url }}" target="_blank" style="display:inline-block;padding:10px 20px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;line-height:18px;color:#ffffff;text-decoration:none;border-radius:6px;">{{ label }}</a>
+    </td>
+  </tr>
+</table>
+{%- endmacro %}
+{% macro card_open(title, sub=None) -%}
+<tr><td height="16" style="font-size:0;line-height:16px;">&nbsp;</td></tr>
+<tr>
+  <td bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid #dee2e6;border-radius:8px;padding:18px 20px;font-family:Arial,Helvetica,sans-serif;color:#212529;">
+    <h3 style="margin:0 0 {{ '2px' if sub else '12px' }} 0;font-size:16px;line-height:22px;color:#343a40;">{{ title }}</h3>
+    {% if sub %}<p style="margin:0 0 12px 0;font-size:13px;line-height:18px;color:#6c757d;">{{ sub }}</p>{% endif %}
+{%- endmacro %}
+{% macro card_close() -%}
+  </td>
+</tr>
+{%- endmacro %}
+<body style="margin:0;padding:0;background-color:#f4f5f7;">
+{#- Preview line some mail apps show next to the subject. Hidden in the body. #}
+<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#f4f5f7;">
+  Bugün girecek {{ s.due_today.incoming|thousands }} ₺, çıkacak {{ s.due_today.outgoing|thousands }} ₺. Vadesi geçmiş: {{ s.late_total|thousands }} ₺.
 </div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f5f7" style="background-color:#f4f5f7;">
+  <tr>
+    <td align="center" style="padding:16px 8px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
+
+        <!-- Header -->
+        <tr>
+          <td bgcolor="#667eea" style="background-color:#667eea;border-radius:8px;padding:24px 20px;font-family:Arial,Helvetica,sans-serif;">
+            <p style="margin:0 0 4px 0;font-size:12px;line-height:16px;letter-spacing:1px;text-transform:uppercase;color:#e0e4ff;">Konak İnşaat · Muhasebe Sistemi</p>
+            <h2 style="margin:0;font-size:24px;line-height:30px;color:#ffffff;">Günlük Özet</h2>
+            <p style="margin:4px 0 0 0;font-size:14px;line-height:20px;color:#e0e4ff;">{{ s.today.strftime('%d.%m.%Y') }}</p>
+          </td>
+        </tr>
+
+        <!-- Checks due today and tomorrow -->
+        {% for block, title in ((s.due_today, 'Bugün vadesi gelen çekler'), (s.due_tomorrow, 'Yarın vadesi gelen çekler')) %}
+        {{ card_open(title, block.day.strftime('%d.%m.%Y')) }}
+          {% if block.checks %}
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;line-height:20px;">
+            <tr>
+              <th align="left" bgcolor="#e9ecef" style="background-color:#e9ecef;padding:8px;font-size:12px;color:#495057;text-align:left;">Tip</th>
+              <th align="left" bgcolor="#e9ecef" style="background-color:#e9ecef;padding:8px;font-size:12px;color:#495057;text-align:left;">Kişi / Firma</th>
+              <th align="left" bgcolor="#e9ecef" style="background-color:#e9ecef;padding:8px;font-size:12px;color:#495057;text-align:left;">Proje</th>
+              <th align="right" bgcolor="#e9ecef" style="background-color:#e9ecef;padding:8px;font-size:12px;color:#495057;text-align:right;">Tutar</th>
+            </tr>
+            {% for c in block.checks %}
+            <tr>
+              <td style="padding:8px;border-bottom:1px solid #dee2e6;">{{ 'Alınan' if c.kind == 'in' else 'Verilen' }}</td>
+              <td style="padding:8px;border-bottom:1px solid #dee2e6;">{{ c.party or '-' }}</td>
+              <td style="padding:8px;border-bottom:1px solid #dee2e6;">{{ c.project_name or '-' }}</td>
+              <td align="right" style="padding:8px;border-bottom:1px solid #dee2e6;text-align:right;white-space:nowrap;">{{ c.amount|thousands }} ₺</td>
+            </tr>
+            {% endfor %}
+          </table>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;line-height:20px;">
+            <tr>
+              <td align="right" style="padding:10px 8px 0 8px;text-align:right;color:#495057;">
+                Girecek: <strong style="color:#212529;">{{ block.incoming|thousands }} ₺</strong>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                Çıkacak: <strong style="color:#212529;">{{ block.outgoing|thousands }} ₺</strong>
+              </td>
+            </tr>
+          </table>
+          {% else %}
+          <p style="margin:0;font-size:14px;line-height:20px;color:#6c757d;">Vadesi gelen çek yok.</p>
+          {% endif %}
+        {{ card_close() }}
+        {% endfor %}
+
+        <!-- Late installments -->
+        {{ card_open('Vadesi geçmiş taksitler') }}
+          {% if s.late_customers %}
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td width="40%" valign="top" style="padding:0 8px 0 0;">
+                <p style="margin:0;font-size:12px;line-height:16px;color:#6c757d;">Toplam</p>
+                <p style="margin:2px 0 0 0;font-size:20px;line-height:26px;font-weight:bold;color:#dc3545;white-space:nowrap;">{{ s.late_total|thousands }} ₺</p>
+              </td>
+              <td width="30%" valign="top" style="padding:0 8px;">
+                <p style="margin:0;font-size:12px;line-height:16px;color:#6c757d;">Müşteri</p>
+                <p style="margin:2px 0 0 0;font-size:20px;line-height:26px;font-weight:bold;color:#212529;">{{ s.late_customers }}</p>
+              </td>
+              <td width="30%" valign="top" style="padding:0 0 0 8px;">
+                <p style="margin:0;font-size:12px;line-height:16px;color:#6c757d;">En eski gecikme</p>
+                <p style="margin:2px 0 0 0;font-size:20px;line-height:26px;font-weight:bold;color:#212529;">{{ s.late_oldest_days }} gün</p>
+              </td>
+            </tr>
+          </table>
+          {{ button(site ~ '/overdue', 'Gecikme raporunu aç') }}
+          {% else %}
+          <p style="margin:0;font-size:14px;line-height:20px;color:#6c757d;">Vadesi geçmiş taksit yok.</p>
+          {% endif %}
+        {{ card_close() }}
+
+        <!-- Cash position -->
+        {{ card_open('Önümüzdeki ' ~ s.weeks ~ ' hafta nakit durumu') }}
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;line-height:20px;">
+            <tr>
+              <th align="left" bgcolor="#e9ecef" style="background-color:#e9ecef;padding:8px;font-size:12px;color:#495057;text-align:left;">Hafta</th>
+              <th align="right" bgcolor="#e9ecef" style="background-color:#e9ecef;padding:8px;font-size:12px;color:#495057;text-align:right;">Giriş</th>
+              <th align="right" bgcolor="#e9ecef" style="background-color:#e9ecef;padding:8px;font-size:12px;color:#495057;text-align:right;">Çıkış</th>
+              <th align="right" bgcolor="#e9ecef" style="background-color:#e9ecef;padding:8px;font-size:12px;color:#495057;text-align:right;">Kümülatif</th>
+            </tr>
+            {% for w in s.cash.weeks %}
+            <tr>
+              <td style="padding:8px;border-bottom:1px solid #dee2e6;">{{ w.label }}</td>
+              <td align="right" style="padding:8px;border-bottom:1px solid #dee2e6;text-align:right;white-space:nowrap;">{{ w.incoming|thousands }} ₺</td>
+              <td align="right" style="padding:8px;border-bottom:1px solid #dee2e6;text-align:right;white-space:nowrap;">{{ w.outgoing|thousands }} ₺</td>
+              <td align="right" style="padding:8px;border-bottom:1px solid #dee2e6;text-align:right;white-space:nowrap;font-weight:bold;color:{{ '#dc3545' if w.negative else '#212529' }};">{{ w.cumulative|thousands }} ₺</td>
+            </tr>
+            {% endfor %}
+          </table>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;line-height:20px;">
+            <tr>
+              <td align="right" style="padding:10px 8px 0 8px;text-align:right;color:#495057;">
+                Net: <strong style="color:{{ '#dc3545' if s.cash.total_net < 0 else '#212529' }};">{{ s.cash.total_net|thousands }} ₺</strong>
+              </td>
+            </tr>
+          </table>
+          {% if s.cash.first_negative %}
+          <p style="margin:8px 0 0 0;font-size:14px;line-height:20px;color:#dc3545;">Kümülatif {{ s.cash.negative_count }} hafta eksiye düşüyor (ilk: {{ s.cash.first_negative.label }}).</p>
+          {% endif %}
+          {{ button(site ~ '/cashflow', 'Nakit akışını aç') }}
+        {{ card_close() }}
+
+        <!-- Footer -->
+        <tr><td height="16" style="font-size:0;line-height:16px;">&nbsp;</td></tr>
+        <tr>
+          <td style="padding:0 8px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#6c757d;">
+            Portföydeki çekler vade tarihinde beklenen para sayılır; bu bir tahmindir, borç kapatmaz. Karşılıksız çekler dahil değildir.
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
 </body>
 </html>

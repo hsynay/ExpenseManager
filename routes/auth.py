@@ -2,9 +2,11 @@
 from flask import (
     render_template, request, redirect, url_for, session, flash, jsonify,
 )
+from urllib.parse import urlsplit
 from db import get_connection
 from werkzeug.security import check_password_hash
 from core import app, limiter
+from helpers import safe_next
 
 
 def get_user_by_email(email):
@@ -46,6 +48,12 @@ def login():
             # the cookie on each request, so the session ends 12 hours after
             # the last activity.
             session.permanent = True
+            # The form posts to the same address, query string included, so
+            # ?next= from login_required is still here. safe_next drops any
+            # address that points outside this site.
+            target = safe_next(request.args.get('next'))
+            if target and urlsplit(target).path not in ('/login', '/logout'):
+                return redirect(target)
             return redirect(url_for('dashboard'))
         else:
             flash('E-posta veya şifre hatalı.', 'danger')
