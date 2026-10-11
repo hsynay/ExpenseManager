@@ -38,6 +38,10 @@ POOL_MAX = int(os.getenv("DB_POOL_MAX", "10"))
 # A connection idle for longer than this is tested before it is reused.
 IDLE_CHECK_SECONDS = 30
 
+# Opening a connection must not wait forever. Without a limit, a network that
+# swallows the packets would hold the only worker until gunicorn kills it.
+CONNECT_TIMEOUT_SECONDS = int(os.getenv("DB_CONNECT_TIMEOUT", "10"))
+
 _pool = None
 _pool_lock = threading.Lock()
 _last_used = {}          # id(raw connection) -> time it went back to the pool
@@ -50,6 +54,7 @@ def _connect_params():
         dbname=os.getenv("DB_NAME"),
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASSWORD"),
+        connect_timeout=CONNECT_TIMEOUT_SECONDS,
     )
 
 
