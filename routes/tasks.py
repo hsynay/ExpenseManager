@@ -8,7 +8,8 @@ from db import get_connection
 from core import app, limiter
 from helpers import today_istanbul
 from daily_summary import (
-    gather_summary, read_mail_settings, build_message, send_message,
+    gather_summary, read_mail_settings, render_mail, build_payload, send_mail,
+    MailSendError,
 )
 
 
@@ -54,12 +55,15 @@ def daily_summary_task():
         conn.close()
 
     try:
-        message = build_message(summary, settings['user'],
-                                settings['recipients'], request.url_root)
-        send_message(message, settings)
+        mail = render_mail(summary, request.url_root)
+        send_mail(build_payload(mail, settings), settings['api_key'])
+    except MailSendError as exc:
+        # The text already has the API key masked out. The caller only learns
+        # that it failed.
+        app.logger.error('Daily summary: the mail could not be sent: %s', exc)
+        return jsonify({'sent': False, 'reason': 'mail_error'}), 502
     except Exception:
-        # The log gets the full error, the caller only learns that it failed.
-        app.logger.exception('Daily summary: the mail could not be sent')
+        app.logger.exception('Daily summary: the mail could not be prepared')
         return jsonify({'sent': False, 'reason': 'mail_error'}), 502
 
     app.logger.info('Daily summary sent to %d recipient(s)',

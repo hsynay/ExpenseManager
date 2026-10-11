@@ -1,77 +1,70 @@
 """/tasks/daily-summary: the token lock, the mail settings and the mail itself.
 
-No real mail is ever sent: smtplib is replaced by a recorder. "Today" is
-Wednesday 17 June 2026.
+No real request is ever made: requests.post is replaced by a recorder. "Today"
+is Wednesday 17 June 2026.
 """
 import logging
-import smtplib
 from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+import requests
 
 import app as app_module
 import daily_summary
-from daily_summary import gather_summary, read_mail_settings
+import db
+from daily_summary import (
+    gather_summary, read_mail_settings, mask_secret, BREVO_URL,
+    CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS,
+)
 
 D = Decimal
 TODAY = date(2026, 6, 17)
 TOKEN = 'test-token-0123456789'
-PASSWORD = 'smtp-secret-password'
+API_KEY = 'xkeysib-0123456789abcdef-SECRETPART'
 
 
-class FakeSMTP:
-    """Records what the job does with the mail server."""
-    instances = []
-    fail_on_login = False
-    uses_ssl = False
+class FakeBrevo:
+    """Stands in for requests.post and records every call."""
 
-    def __init__(self, host, port, timeout=None, context=None):
-        self.host, self.port, self.context = host, port, context
-        self.started_tls = False
-        self.logged_in_as = None
-        self.sent = []
-        type(self).instances.append(self)
+    def __init__(self):
+        self.calls = []
+        self.status = 201
+        self.body = '{"messageId": "<1@brevo>"}'
+        self.raises = None
+        self.on_call = None
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def starttls(self, context=None):
-        self.started_tls = True
-
-    def login(self, user, password):
-        if type(self).fail_on_login:
-            raise smtplib.SMTPAuthenticationError(535, b'rejected')
-        self.logged_in_as = (user, password)
-
-    def send_message(self, message):
-        self.sent.append(message)
+    def post(self, url, json=None, headers=None, timeout=None):
+        self.calls.append({'url': url, 'json': json, 'headers': headers,
+                           'timeout': timeout})
+        if self.on_call:
+            self.on_call()
+        if self.raises:
+            raise self.raises
+        return FakeResponse(self.status, self.body)
 
 
-class FakeSMTPSSL(FakeSMTP):
-    uses_ssl = True
+class FakeResponse:
+    def __init__(self, status_code, text):
+        self.status_code, self.text = status_code, text
 
 
 @pytest.fixture(autouse=True)
-def setup(monkeypatch):
+def brevo(monkeypatch):
     import core
     import routes.tasks
     core.limiter.reset()
-    FakeSMTP.instances = []
-    FakeSMTP.fail_on_login = False
-    monkeypatch.setattr(daily_summary.smtplib, 'SMTP', FakeSMTP)
-    monkeypatch.setattr(daily_summary.smtplib, 'SMTP_SSL', FakeSMTPSSL)
+    fake = FakeBrevo()
+    monkeypatch.setattr(daily_summary.requests, 'post', fake.post)
     monkeypatch.setattr(routes.tasks, 'today_istanbul', lambda: TODAY)
     monkeypatch.setenv('TASK_TOKEN', TOKEN)
     configure_mail(monkeypatch)
+    return fake
 
 
 def configure_mail(monkeypatch, **overrides):
-    values = {'SMTP_HOST': 'smtp.example.test', 'SMTP_PORT': '587',
-              'SMTP_USER': 'sender@example.test', 'SMTP_PASSWORD': PASSWORD,
+    values = {'BREVO_API_KEY': API_KEY,
+              'MAIL_FROM': 'Konak İnşaat <bildirim@example.test>',
               'MAIL_TO': 'boss@example.test, accountant@example.test'}
     values.update(overrides)
     for name, value in values.items():
@@ -92,46 +85,38 @@ def call(client, token=TOKEN):
     return client.get('/tasks/daily-summary', headers={'X-Task-Token': token})
 
 
-def mails():
-    return [m for smtp in FakeSMTP.instances for m in smtp.sent]
-
-
-def html_of(message):
-    return message.get_body(preferencelist=('html',)).get_content()
-
-
-def text_of(message):
-    return message.get_body(preferencelist=('plain',)).get_content()
+def payloads(brevo):
+    return [c['json'] for c in brevo.calls]
 
 
 # --- the token lock -------------------------------------------------------------
 
-def test_wrong_or_missing_token_is_refused_and_nothing_is_sent(anonymous):
+def test_wrong_or_missing_token_is_refused_and_nothing_is_sent(anonymous, brevo):
     assert anonymous.get('/tasks/daily-summary').status_code == 403
     assert call(anonymous, 'wrong').status_code == 403
     assert anonymous.get('/tasks/daily-summary?token=wrong').status_code == 403
     assert call(anonymous, TOKEN[:-1]).status_code == 403
 
-    assert FakeSMTP.instances == []
+    assert brevo.calls == []
 
 
-def test_without_a_token_on_the_server_every_request_is_refused(anonymous,
+def test_without_a_token_on_the_server_every_request_is_refused(anonymous, brevo,
                                                                  monkeypatch):
     monkeypatch.delenv('TASK_TOKEN')
 
     assert anonymous.get('/tasks/daily-summary?token=').status_code == 403
     assert call(anonymous, '').status_code == 403
-    assert FakeSMTP.instances == []
+    assert brevo.calls == []
 
 
 def test_the_token_works_in_the_header_and_in_the_address_without_a_login(
-        anonymous):
+        anonymous, brevo):
     header = call(anonymous)
     query = anonymous.get('/tasks/daily-summary?token=' + TOKEN)
 
     assert header.status_code == 200 and header.get_json()['sent'] is True
     assert query.status_code == 200 and query.get_json()['sent'] is True
-    assert len(mails()) == 2
+    assert len(brevo.calls) == 2
 
 
 def test_guessing_the_token_is_rate_limited(anonymous):
@@ -143,10 +128,9 @@ def test_guessing_the_token_is_rate_limited(anonymous):
 
 # --- mail settings ----------------------------------------------------------------
 
-@pytest.mark.parametrize('missing', ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER',
-                                     'SMTP_PASSWORD', 'MAIL_TO'])
+@pytest.mark.parametrize('missing', ['BREVO_API_KEY', 'MAIL_FROM', 'MAIL_TO'])
 def test_a_missing_setting_skips_the_mail_with_a_200_and_a_log_line(
-        anonymous, monkeypatch, caplog, missing):
+        anonymous, brevo, monkeypatch, caplog, missing):
     configure_mail(monkeypatch, **{missing: None})
 
     with caplog.at_level(logging.WARNING):
@@ -154,18 +138,33 @@ def test_a_missing_setting_skips_the_mail_with_a_200_and_a_log_line(
 
     assert response.status_code == 200
     assert response.get_json() == {'sent': False, 'reason': 'mail_not_configured'}
-    assert FakeSMTP.instances == []
+    assert brevo.calls == []
     assert missing in caplog.text
-    assert PASSWORD not in caplog.text
+    assert API_KEY not in caplog.text
 
 
-def test_a_port_that_is_not_a_number_skips_the_mail(anonymous, monkeypatch):
-    configure_mail(monkeypatch, SMTP_PORT='abc')
+def test_all_missing_settings_are_named_in_the_log(anonymous, brevo, monkeypatch,
+                                                   caplog):
+    configure_mail(monkeypatch, BREVO_API_KEY=None, MAIL_FROM=None, MAIL_TO=None)
 
-    response = call(anonymous)
+    with caplog.at_level(logging.WARNING):
+        assert call(anonymous).status_code == 200
+
+    for name in ('BREVO_API_KEY', 'MAIL_FROM', 'MAIL_TO'):
+        assert name in caplog.text
+    assert brevo.calls == []
+
+
+def test_a_sender_without_an_address_skips_the_mail(anonymous, brevo, monkeypatch,
+                                                    caplog):
+    configure_mail(monkeypatch, MAIL_FROM='Konak Insaat')
+
+    with caplog.at_level(logging.WARNING):
+        response = call(anonymous)
 
     assert response.status_code == 200 and response.get_json()['sent'] is False
-    assert FakeSMTP.instances == []
+    assert 'MAIL_FROM' in caplog.text
+    assert brevo.calls == []
 
 
 def test_recipients_may_be_separated_by_commas_or_semicolons(monkeypatch):
@@ -175,55 +174,147 @@ def test_recipients_may_be_separated_by_commas_or_semicolons(monkeypatch):
 
     assert missing == []
     assert settings['recipients'] == ['a@x.test', 'b@x.test', 'c@x.test']
-    assert settings['port'] == 587
+
+
+def test_the_sender_may_be_a_name_with_an_address_or_just_an_address(monkeypatch):
+    settings, _ = read_mail_settings()
+    assert (settings['sender_name'], settings['sender_email']) == (
+        'Konak İnşaat', 'bildirim@example.test')
+
+    configure_mail(monkeypatch, MAIL_FROM='only@example.test')
+    settings, _ = read_mail_settings()
+    assert (settings['sender_name'], settings['sender_email']) == (
+        '', 'only@example.test')
+
+
+def test_the_old_smtp_settings_are_gone():
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    assert 'smtplib' not in (root / 'daily_summary.py').read_text(encoding='utf-8')
+    assert not hasattr(daily_summary, 'smtplib')
+    example = (root / '.env.example').read_text(encoding='utf-8')
+    assert 'SMTP_' not in example and 'BREVO_API_KEY' in example
 
 
 # --- sending ------------------------------------------------------------------------
 
-def test_the_mail_goes_out_over_starttls_to_every_recipient(anonymous):
+def test_the_mail_is_posted_to_brevo_with_the_key_in_the_header(anonymous, brevo):
     response = call(anonymous)
 
     assert response.get_json() == {'sent': True, 'recipients': 2}
-    smtp, = FakeSMTP.instances
-    assert (smtp.host, smtp.port) == ('smtp.example.test', 587)
-    assert smtp.started_tls and smtp.logged_in_as == ('sender@example.test', PASSWORD)
-    message, = smtp.sent
-    assert message['Subject'] == 'Günlük Özet – 17.06.2026'
-    assert message['From'] == 'sender@example.test'
-    assert message['To'] == 'boss@example.test, accountant@example.test'
-    # A plain text part and an HTML part.
-    assert 'GÜNLÜK ÖZET' in text_of(message)
-    assert '<h2' in html_of(message)
-    # The answer to the caller never carries the data or the settings.
-    assert PASSWORD not in response.get_data(as_text=True)
+    call_made, = brevo.calls
+    assert call_made['url'] == BREVO_URL == 'https://api.brevo.com/v3/smtp/email'
+    assert call_made['headers']['api-key'] == API_KEY
+    body = call_made['json']
+    assert body['sender'] == {'email': 'bildirim@example.test', 'name': 'Konak İnşaat'}
+    assert body['to'] == [{'email': 'boss@example.test'},
+                          {'email': 'accountant@example.test'}]
+    assert body['subject'] == 'Günlük Özet – 17.06.2026'
+    # The same two templates as before: a text body and an HTML body.
+    assert 'GÜNLÜK ÖZET' in body['textContent']
+    assert '<h2' in body['htmlContent']
+    # The key is never in the body, and never in the answer to the caller.
+    assert API_KEY not in str(body)
+    assert API_KEY not in response.get_data(as_text=True)
 
 
-def test_port_465_uses_tls_from_the_start(anonymous, monkeypatch):
-    configure_mail(monkeypatch, SMTP_PORT='465')
+def test_a_sender_without_a_name_sends_only_the_address(anonymous, brevo,
+                                                        monkeypatch):
+    configure_mail(monkeypatch, MAIL_FROM='only@example.test')
+
+    call(anonymous)
+
+    assert brevo.calls[0]['json']['sender'] == {'email': 'only@example.test'}
+
+
+def test_the_request_has_a_timeout_that_cannot_freeze_the_worker(anonymous, brevo):
+    call(anonymous)
+
+    connect, read = brevo.calls[0]['timeout']
+    assert (connect, read) == (CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS)
+    assert 0 < connect <= 10 and 0 < read <= 10
+    # Gunicorn kills a worker after 30 seconds.
+    assert connect + read < 30
+
+
+def test_the_database_connection_is_given_back_before_the_http_call(anonymous,
+                                                                     brevo):
+    in_use_before = db.pool_stats()[0]
+    seen = []
+    brevo.on_call = lambda: seen.append(db.pool_stats()[0])
 
     assert call(anonymous).status_code == 200
 
-    smtp, = FakeSMTP.instances
-    assert smtp.uses_ssl and not smtp.started_tls and len(smtp.sent) == 1
+    assert seen == [in_use_before]
 
 
-def test_a_mail_server_failure_gives_502_and_leaks_nothing(anonymous, caplog):
-    FakeSMTP.fail_on_login = True
+@pytest.mark.parametrize('status', [400, 401, 402, 403, 429, 500, 503])
+def test_an_api_error_gives_502_and_leaks_nothing(anonymous, brevo, caplog, status):
+    # Even a provider that repeats our key back must not get it into the log.
+    brevo.status = status
+    brevo.body = '{"message": "Key not found: %s", "code": "unauthorized"}' % API_KEY
 
     with caplog.at_level(logging.ERROR):
         response = call(anonymous)
 
     assert response.status_code == 502
     assert response.get_json() == {'sent': False, 'reason': 'mail_error'}
-    body = response.get_data(as_text=True)
-    assert 'rejected' not in body and 'Traceback' not in body and PASSWORD not in body
-    assert 'could not be sent' in caplog.text
-    assert PASSWORD not in caplog.text
+    answer = response.get_data(as_text=True)
+    assert 'unauthorized' not in answer and API_KEY not in answer
+    assert 'Traceback' not in answer
+    assert 'could not be sent' in caplog.text and str(status) in caplog.text
+    assert API_KEY not in caplog.text and 'SECRETPART' not in caplog.text
+    assert len(brevo.calls) == 1            # no retry
+
+
+@pytest.mark.parametrize('error', [
+    requests.exceptions.ConnectTimeout('connect timed out'),
+    requests.exceptions.ReadTimeout('read timed out'),
+    requests.exceptions.ConnectionError('network is unreachable'),
+    requests.exceptions.SSLError('certificate problem'),
+])
+def test_a_network_failure_gives_502_and_one_attempt(anonymous, brevo, caplog,
+                                                     error):
+    brevo.raises = error
+
+    with caplog.at_level(logging.ERROR):
+        response = call(anonymous)
+
+    assert response.status_code == 502
+    assert response.get_json() == {'sent': False, 'reason': 'mail_error'}
+    assert type(error).__name__ in caplog.text
+    assert len(brevo.calls) == 1
+
+
+def test_an_error_text_that_contains_the_key_is_masked_in_the_log(anonymous, brevo,
+                                                                   caplog):
+    brevo.raises = requests.exceptions.ConnectionError(
+        'proxy rejected header api-key: %s' % API_KEY)
+
+    with caplog.at_level(logging.DEBUG):
+        response = call(anonymous)
+
+    assert response.status_code == 502
+    assert API_KEY not in caplog.text and 'SECRETPART' not in caplog.text
+    assert API_KEY not in response.get_data(as_text=True)
+
+
+def test_mask_secret():
+    assert mask_secret('bad key %s here' % API_KEY, API_KEY) == 'bad key *** here'
+    # Anything shaped like a Brevo key is hidden, even if it is another key.
+    assert 'abc123' not in mask_secret('x xkeysib-abc123-def y', 'something-else')
+    assert mask_secret('nothing secret', '') == 'nothing secret'
+
+
+def test_the_timeouts_are_set_for_the_database_too():
+    assert db._connect_params()['connect_timeout'] == db.CONNECT_TIMEOUT_SECONDS
+    assert 0 < db.CONNECT_TIMEOUT_SECONDS <= 10
 
 
 # --- what the mail says -----------------------------------------------------------------
 
-def test_mail_lists_waiting_checks_due_today_and_tomorrow_only(anonymous, factory):
+def test_mail_lists_waiting_checks_due_today_and_tomorrow_only(anonymous, brevo,
+                                                               factory):
     customer_id = factory.customer(first='XlsxOzet')
     supplier_id = factory.supplier(name='XlsxOzetci')
     factory.check(customer_id, D('1111'), due_date=TODAY)
@@ -236,21 +327,22 @@ def test_mail_lists_waiting_checks_due_today_and_tomorrow_only(anonymous, factor
 
     call(anonymous)
 
-    html = html_of(mails()[0])
+    html = payloads(brevo)[0]['htmlContent']
+    text = payloads(brevo)[0]['textContent']
     assert '1.111 ₺' in html and '2.222 ₺' in html
     for hidden in ('3.333', '4.444', '5.555', '6.666'):
-        assert hidden not in html
+        assert hidden not in html and hidden not in text
     assert 'PYTEST XlsxOzet Musteri' in html and 'PYTEST XlsxOzetci' in html
 
 
-def test_names_in_the_mail_are_escaped(anonymous, factory):
+def test_names_in_the_mail_are_escaped(anonymous, brevo, factory):
     customer_id = factory.customer(first='<b>kalin</b>')
     factory.check(customer_id, D('9876'), due_date=TODAY)
     factory.commit()
 
     call(anonymous)
 
-    html = html_of(mails()[0])
+    html = payloads(brevo)[0]['htmlContent']
     assert '&lt;b&gt;kalin&lt;/b&gt;' in html and '<b>kalin</b>' not in html
 
 
