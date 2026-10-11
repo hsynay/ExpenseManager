@@ -13,10 +13,89 @@
         .list-group-item strong {
             display: block;
         }
+        /* Release notes banner. Closed, it is removed from the page, so the
+           dashboard looks exactly as it did before. */
+        .release-notes {
+            border-left: 4px solid #667eea;
+        }
+        .release-notes-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+        .release-notes-list {
+            margin: 0 0 0.75rem 0;
+            padding-left: 1.1rem;
+            font-size: 0.9rem;
+        }
+        .release-notes-list li {
+            break-inside: avoid;
+            margin-bottom: 0.35rem;
+        }
+        @media (min-width: 992px) {
+            .release-notes-list {
+                columns: 2;
+                column-gap: 2rem;
+            }
+        }
+        /* The last note is a notice, not a feature, so it sits in its own box. */
+        .release-notes-info {
+            background: rgba(255, 255, 255, 0.65);
+            border: 1px dashed #6c757d;
+            border-radius: 0.375rem;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.85rem;
+            color: #495057;
+        }
     </style>
 {% endblock %}
 
 {% block content %}
+{# Release notes banner. It is shown until the user closes it; the choice is
+   kept in localStorage under the key below. To show it again for a new
+   release, change the key (and the text). #}
+{% set release_notes_key = 'release_notes_2026_10' %}
+<div id="release-notes-banner" class="alert alert-primary alert-dismissible release-notes mb-4" role="region" aria-label="Yenilikler" data-storage-key="{{ release_notes_key }}">
+    <button type="button" class="btn-close" id="release-notes-close" aria-label="Kapat"></button>
+    <h5 class="release-notes-title"><i class="fa-solid fa-gift me-2"></i>Uygulamaya yeni özellikler eklendi</h5>
+    <ul class="release-notes-list">
+        <li><strong>Nakit akışı:</strong> Önümüzdeki 3, 6 veya 12 ayda ne girecek, ne çıkacak, hangi hafta para sıkışacak — tek ekranda.</li>
+        <li><strong>Çek takvimi:</strong> Alınan ve verilen tüm çekler vade sırasına göre tek listede. Vadesi geçenler ayrı başlıkta.</li>
+        <li><strong>Gecikme raporu:</strong> Hangi müşteri ne kadar geciktirdi, kaç gündür — 30, 60, 90 gün aralıklarıyla.</li>
+        <li><strong>Proje kârlılığı:</strong> Proje başına satılan, tahsil edilen, kalan alacak, harcanan ve öngörülen kâr.</li>
+        <li><strong>Excel'e aktarma:</strong> Ödemeler, çekler, giderler ve borçlar sayfalarından listeyi Excel dosyası olarak indirebilirsin.</li>
+        <li><strong>Arama kutuları:</strong> Liste sayfalarında arama ve filtreleme.</li>
+        <li><strong>Günlük özet e-postası:</strong> Her sabah vadesi gelen çekler ve geciken ödemeler e-posta olarak geliyor.</li>
+        <li><strong>Daha hızlı:</strong> Raporlar sayfası belirgin biçimde hızlandı.</li>
+    </ul>
+    <div class="release-notes-info">
+        <i class="fa-solid fa-circle-info me-2"></i><strong>Düzeltme:</strong> Borç dökümündeki "Kalan Borç" hesabı düzeltildi. Portföydeki ve karşılıksız çekler artık ödenmiş sayılmıyor, bu yüzden bazı müşterilerde rakam önceki döküme göre farklı çıkabilir. Doğrusu yeni rakamdır.
+    </div>
+</div>
+{# Runs right after the banner, before the page is painted, so a closed
+   banner never flashes. Storage can be blocked (private window, strict
+   settings): then the banner simply stays visible. #}
+<script>
+(function () {
+    var banner = document.getElementById('release-notes-banner');
+    if (!banner) return;
+    var key = banner.getAttribute('data-storage-key');
+    try {
+        if (window.localStorage.getItem(key) === '1') {
+            banner.remove();
+            return;
+        }
+    } catch (e) { /* storage not readable: keep the banner */ }
+    var closeButton = document.getElementById('release-notes-close');
+    if (!closeButton) return;
+    closeButton.addEventListener('click', function () {
+        try {
+            window.localStorage.setItem(key, '1');
+        } catch (e) { /* storage not writable: the banner comes back next time */ }
+        banner.remove();
+    });
+})();
+</script>
+
 <div class="row g-4">
     <div class="col-lg-4">
         <div class="card mb-4">
@@ -150,6 +229,7 @@
                              {# Projeler blueprint'ine taşındığı varsayılarak url_for güncellendi #}
                             <a href="{{ url_for('project_overview', project_id=project.id) }}" class="btn btn-info btn-sm"><i class="fa-solid fa-list -column me-1"></i>Tüm Gelir & Gider</a>
                             <a href="{{ url_for('project_transactions', project_id=project.id) }}" class="btn btn-secondary btn-sm"><i class="fa-solid fa-check-square me-1"></i>Ödenmiş Gelir & Gider</a>
+                            <a href="{{ url_for('project_profitability', project_id=project.id) }}" class="btn btn-success btn-sm"><i class="fa-solid fa-scale-balanced me-1"></i>Kârlılık</a>
                             <!-- <a href="{{ url_for('list_expenses', project_id=project.id) }}" class="btn btn-primary btn-sm"><i class="fa-solid fa-file-invoice-dollar me-1"></i> Gider Düzenle</a> -->
                             <a href="{{ url_for('edit_project', project_id=project.id) }}" class="btn btn-warning btn-sm"><i class="fa-solid fa-pencil me-1"></i> Düzenle</a>
                             <form action="{{ url_for('delete_project', project_id=project.id) }}" method="POST" class="d-inline project-delete-form" data-project-name="{{ project.name }}">

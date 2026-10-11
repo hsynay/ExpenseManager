@@ -384,3 +384,100 @@ def test_the_job_only_reads_and_runs_three_queries(anonymous, query_counter):
         assert statement.startswith(('SELECT', 'WITH'))
         for word in ('INSERT ', 'UPDATE ', 'DELETE ', 'DROP ', 'ALTER '):
             assert word not in statement
+
+
+# --- how the mail looks ----------------------------------------------------------------
+# Mail clients (Gmail, Outlook, Hotmail) ignore modern CSS, so the layout rules
+# are checked on the finished HTML: tables, inline styles, 600 pixels.
+
+def sample_summary(negative=True):
+    weeks = [
+        {'label': '15.06 - 21.06', 'incoming': D('700'), 'outgoing': D('250000'),
+         'cumulative': D('-249300'), 'negative': True},
+        {'label': '22.06 - 28.06', 'incoming': D('1250000'), 'outgoing': D('0'),
+         'cumulative': D('1000700'), 'negative': False},
+    ]
+    if not negative:
+        weeks = weeks[1:]
+    return {
+        'today': TODAY,
+        'due_today': {'day': TODAY, 'checks': [
+            {'kind': 'in', 'party': 'Ali', 'project_name': 'Proje', 'amount': D('1234567')}],
+            'incoming': D('1234567'), 'outgoing': D('0')},
+        'due_tomorrow': {'day': TODAY + timedelta(days=1), 'checks': [],
+                         'incoming': D('0'), 'outgoing': D('0')},
+        'late_total': D('5000'), 'late_customers': 2, 'late_oldest_days': 41,
+        'cash': {'weeks': weeks, 'total_net': D('1000'),
+                 'first_negative': weeks[0] if negative else None,
+                 'negative_count': 1 if negative else 0},
+        'weeks': 4,
+    }
+
+
+def render(summary):
+    with app_module.app.test_request_context('/'):
+        return daily_summary.render_mail(summary, 'https://site.test/')
+
+
+def test_layout_is_table_based_inline_and_600_wide():
+    html = render(sample_summary())['html']
+
+    assert 'width="600"' in html and 'max-width:600px' in html
+    assert html.count('<table') == html.count('</table>') >= 5
+    # No style sheet and no layout built from div boxes: only inline styles.
+    assert '<style' not in html and 'class=' not in html
+    assert '<div' not in html.replace('<div style="display:none', '')
+    assert '<link' not in html and '<script' not in html
+
+
+def test_each_section_is_its_own_card():
+    html = render(sample_summary())['html']
+
+    for title in ('Bugün vadesi gelen çekler', 'Yarın vadesi gelen çekler',
+                  'Vadesi geçmiş taksitler', 'nakit durumu'):
+        assert title in html
+    assert html.count('<h3') == 4        # one card per section
+    assert '<h2' in html                 # the header block
+
+
+def test_numbers_are_right_aligned_with_thousands_separator():
+    html = render(sample_summary())['html']
+
+    assert '1.234.567 ₺' in html and '1.250.000 ₺' in html
+    assert 'align="right"' in html and 'text-align:right' in html
+
+
+def test_only_a_negative_cumulative_is_red():
+    html = render(sample_summary(negative=True))['html']
+    assert 'color:#dc3545;">-249.300 ₺' in html
+    assert 'color:#212529;">1.000.700 ₺' in html
+
+    # With no negative week, the weekly table has no red number. The late
+    # total is red on purpose, so look at the cash table only.
+    cash = render(sample_summary(negative=False))['html'].split('nakit durumu')[1]
+    assert '#dc3545' not in cash.split('Net:')[0]
+
+
+def test_links_are_buttons_inside_a_coloured_box():
+    mail = render(sample_summary())
+
+    html = mail['html']
+    assert html.count('<a ') == 2
+    for url in ('https://site.test/overdue', 'https://site.test/cashflow'):
+        assert 'href="%s"' % url in html
+    # The box colour sits on the table cell (Outlook) and the link is padded.
+    assert html.count('bgcolor="#667eea"') >= 3      # header + two buttons
+    assert 'display:inline-block;padding:10px 20px' in html
+    assert 'https://site.test/overdue' in mail['text']
+    assert 'https://site.test/cashflow' in mail['text']
+
+
+def test_plain_text_version_has_all_sections_and_marks_negative_weeks():
+    text = render(sample_summary())['text']
+
+    for line in ('GÜNLÜK ÖZET - 17.06.2026', 'BUGÜN VADESİ GELEN ÇEKLER',
+                 'YARIN VADESİ GELEN ÇEKLER', 'VADESİ GEÇMİŞ TAKSİTLER',
+                 'NAKİT DURUMU', 'Net: 1.000 TL'):
+        assert line in text
+    assert '-249.300 TL  (EKSİ)' in text
+    assert '<table' not in text and '<td' not in text
