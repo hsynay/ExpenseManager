@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}{{ f.project_name if f else 'Proje' }} - Kârlılık Özeti{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+        <h2 class="fw-bold mb-0"><i class="fa-solid fa-scale-balanced me-2 text-primary"></i>Kârlılık Özeti</h2>
+        {% if f %}
+        <p class="text-muted fs-5 mb-0">{{ f.project_name }} <span class="badge bg-secondary">{{ f.project_type|capitalize }}</span></p>
+        {% endif %}
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('project_overview', project_id=project_id) }}" class="btn btn-outline-info"><i class="fa-solid fa-list me-1"></i>Tüm Gelir &amp; Gider</a>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Geri</a>
+    </div>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, msg in messages %}<div class="alert alert-{{category}}">{{msg}}</div>{% endfor %}
+{% endwith %}
+
+{% if f %}
+
+{% if f.sold_count < f.flat_count %}
+<div class="alert alert-info">
+    <i class="fa-solid fa-circle-info me-1"></i>
+    Projede {{ f.flat_count }} daireden {{ f.sold_count }} tanesinin sahibi atanmış.
+    Satılan toplam yalnızca sahibi atanmış daireleri içerir, bu yüzden öngörülen kâr da yalnızca bu daireler üzerinden hesaplanır;
+    giderler ise projenin tamamına aittir.
+</div>
+{% endif %}
+
+<div class="row g-3 mb-4">
+    <div class="col-12 col-lg-6">
+        <div class="card h-100">
+            <div class="card-header"><h5 class="mb-0"><i class="fa-solid fa-sack-dollar text-success me-2"></i>Gelir</h5></div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Satılan toplam</span>
+                    <strong class="fs-5">{{ f.sold|thousands }} ₺</strong>
+                </div>
+                <small class="text-muted d-block mb-3">Sahibi atanmış dairelerin <code>flats.total_price</code> toplamı ({{ f.sold_count }} daire).</small>
+
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Tahsil edilen</span>
+                    <strong class="fs-5 text-success">{{ f.collected|thousands }} ₺</strong>
+                </div>
+                <small class="text-muted d-block mb-3"><code>payments</code> tablosundan: nakit ödemeler + durumu <em>tahsil_edildi</em> olan çekler. Portföydeki ve karşılıksız çekler sayılmaz.</small>
+
+                <div class="d-flex justify-content-between align-items-center border-top pt-3">
+                    <span class="fw-semibold">Kalan alacak</span>
+                    <strong class="fs-5 {% if f.receivable > 0 %}text-danger{% endif %}">{{ f.receivable|thousands }} ₺</strong>
+                </div>
+                <small class="text-muted d-block">Satılan toplam − tahsil edilen.</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-6">
+        <div class="card h-100">
+            <div class="card-header"><h5 class="mb-0"><i class="fa-solid fa-file-invoice-dollar text-danger me-2"></i>Gider</h5></div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Harcanan</span>
+                    <strong class="fs-5">{{ f.spent|thousands }} ₺</strong>
+                </div>
+                <small class="text-muted d-block mb-3">
+                    Gerçekten ödenen para (nakit esası): <code>supplier_payments</code> içinde nakit veya durumu <em>odendi</em> olan çekler
+                    ({{ f.spent_paid|thousands }} ₺) + <code>petty_cash_expenses</code> ({{ f.spent_petty|thousands }} ₺).
+                    "Tüm Gelir &amp; Gider" sayfasındaki ödenmiş gider ile aynı kaynak.
+                </small>
+
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Taahhüt</span>
+                    <strong class="fs-5 text-warning">{{ f.committed|thousands }} ₺</strong>
+                </div>
+                <small class="text-muted d-block mb-1">
+                    Henüz ödenmemiş kalan gider planı: <code>expense_schedule</code> toplamı ({{ f.planned_total|thousands }} ₺) − ödenen ({{ f.spent_paid|thousands }} ₺).
+                </small>
+                <small class="text-muted d-block mb-3">
+                    <i class="fa-solid fa-money-check me-1"></i>Bilgi: tedarikçilere verilmiş ama henüz ödenmemiş (<code>verildi</code>) çıkış çekleri toplam {{ f.handed_checks|thousands }} ₺.
+                    Bu çekler borcu kapatmadığı için taahhüt hesabında zaten sayılır, üzerine eklenmez.
+                </small>
+
+                <div class="d-flex justify-content-between align-items-center border-top pt-3">
+                    <span class="fw-semibold">Toplam gider</span>
+                    <strong class="fs-5">{{ f.total_cost|thousands }} ₺</strong>
+                </div>
+                <small class="text-muted d-block">Harcanan + taahhüt = kooperatif raporunun gider rakamı (<code>expenses.amount</code> + küçük nakit).</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4 border-{{ 'success' if f.forecast_profit >= 0 else 'danger' }}">
+    <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h5 class="mb-1">Öngörülen kâr</h5>
+            <small class="text-muted">Satılan toplam − (harcanan + taahhüt). Henüz tahsil edilmemiş alacak da dahildir; bu bir tahmindir, kasadaki para değildir.</small>
+        </div>
+        <strong class="display-6 {{ 'text-success' if f.forecast_profit >= 0 else 'text-danger' }}">{{ f.forecast_profit|thousands }} ₺</strong>
+    </div>
+</div>
+
+{% if f.overpaid_count %}
+<div class="alert alert-warning">
+    <i class="fa-solid fa-triangle-exclamation me-1"></i>
+    <strong>{{ f.overpaid_count }} giderde ödeme, plan tutarını aşıyor</strong> (toplam fazla: {{ f.overpaid_total|thousands }} ₺).
+    Taahhüt hesabında bu fazlalık, diğer giderlerin kalanından düşülür; böylece toplam gider kooperatif raporuyla aynı kalır.
+    Büyük olasılıkla bir ödeme iki kez girilmiş ya da gider planı eksik girilmiş. Gider listesinden kontrol etmeniz önerilir.
+</div>
+{% endif %}
+
+{% else %}
+<div class="alert alert-danger">Kârlılık özeti şu an gösterilemiyor.</div>
+{% endif %}
+{% endblock %}

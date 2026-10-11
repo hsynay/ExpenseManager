@@ -270,6 +270,10 @@ def safe_next(value):
 def login_required(view):
     """Send anyone without a session to the login page.
 
+    The page they asked for travels along as ?next=, so the login can bring
+    them back to it. Only GET requests carry it: after a form post there is
+    nothing to come back to, and a POST only route would answer 405.
+
     Goes under @app.route, so the route registers this wrapper. wraps keeps
     the original function name, which Flask uses as the endpoint name, so
     every url_for call keeps working.
@@ -277,6 +281,11 @@ def login_required(view):
     @wraps(view)
     def wrapper(*args, **kwargs):
         if 'user_id' not in session:
+            if request.method == 'GET':
+                target = request.path
+                if request.query_string:
+                    target += '?' + request.query_string.decode('utf-8', 'replace')
+                return redirect(url_for('login', next=target))
             return redirect(url_for('login'))
         return view(*args, **kwargs)
     return wrapper

@@ -2,7 +2,7 @@
 calendar, overdue report and project profitability.
 
 Every route here only reads. They are GET routes behind login_required."""
-from flask import render_template, request, flash, session
+from flask import render_template, request, flash, session, abort
 from db import get_connection
 from core import app
 from helpers import login_required, today_istanbul
@@ -12,6 +12,7 @@ from cashflow import (
 )
 from check_calendar import load_calendar_checks, group_checks
 from overdue import BUCKETS, load_overdue, bucket_totals
+from profitability import load_profitability
 
 
 @app.route('/cashflow')
@@ -109,4 +110,30 @@ def overdue_report():
                            installments=installments,
                            installment_totals=bucket_totals(installments),
                            checks=checks, check_totals=bucket_totals(checks),
+                           user_name=session.get('user_name'))
+
+
+@app.route('/project/<int:project_id>/profitability')
+@login_required
+def project_profitability(project_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        figures = load_profitability(cur, project_id)
+    except Exception:
+        app.logger.exception('Failed to build profitability of project %s',
+                             project_id)
+        flash('Kârlılık özeti hazırlanırken bir hata oluştu.', 'danger')
+        figures = None
+        failed = True
+    else:
+        failed = False
+    finally:
+        cur.close()
+        conn.close()
+
+    if figures is None and not failed:
+        abort(404)
+    return render_template('project_profitability.html', f=figures,
+                           project_id=project_id,
                            user_name=session.get('user_name'))
