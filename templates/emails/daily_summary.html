@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="tr">
+<body style="margin:0;padding:16px;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#212529;">
+<div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:8px;padding:20px;">
+
+  <h2 style="margin:0 0 4px 0;">Günlük Özet</h2>
+  <p style="margin:0 0 16px 0;color:#6c757d;">{{ s.today.strftime('%d.%m.%Y') }}</p>
+
+  {% for block, title in ((s.due_today, 'Bugün vadesi gelen çekler'), (s.due_tomorrow, 'Yarın vadesi gelen çekler')) %}
+  <h3 style="margin:20px 0 6px 0;font-size:16px;">{{ title }} ({{ block.day.strftime('%d.%m.%Y') }})</h3>
+  {% if block.checks %}
+  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <tr style="background:#e9ecef;text-align:left;">
+      <th style="padding:6px;">Tip</th><th style="padding:6px;">Kişi / Firma</th><th style="padding:6px;">Proje</th><th style="padding:6px;text-align:right;">Tutar</th>
+    </tr>
+    {% for c in block.checks %}
+    <tr style="border-bottom:1px solid #dee2e6;">
+      <td style="padding:6px;">{{ 'Alınan' if c.kind == 'in' else 'Verilen' }}</td>
+      <td style="padding:6px;">{{ c.party or '-' }}</td>
+      <td style="padding:6px;">{{ c.project_name or '-' }}</td>
+      <td style="padding:6px;text-align:right;">{{ c.amount|thousands }} ₺</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p style="margin:6px 0 0 0;font-size:14px;">Girecek: <strong>{{ block.incoming|thousands }} ₺</strong> &nbsp;|&nbsp; Çıkacak: <strong>{{ block.outgoing|thousands }} ₺</strong></p>
+  {% else %}
+  <p style="margin:0;color:#6c757d;">Vadesi gelen çek yok.</p>
+  {% endif %}
+  {% endfor %}
+
+  <h3 style="margin:24px 0 6px 0;font-size:16px;">Vadesi geçmiş taksitler</h3>
+  {% if s.late_customers %}
+  <p style="margin:0;font-size:14px;">Toplam <strong style="color:#dc3545;">{{ s.late_total|thousands }} ₺</strong>,
+    {{ s.late_customers }} müşteri, en eski gecikme {{ s.late_oldest_days }} gün.
+    <a href="{{ site }}/overdue">Gecikme raporu</a></p>
+  {% else %}
+  <p style="margin:0;color:#6c757d;">Vadesi geçmiş taksit yok.</p>
+  {% endif %}
+
+  <h3 style="margin:24px 0 6px 0;font-size:16px;">Önümüzdeki {{ s.weeks }} hafta nakit durumu</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <tr style="background:#e9ecef;text-align:left;">
+      <th style="padding:6px;">Hafta</th><th style="padding:6px;text-align:right;">Giriş</th><th style="padding:6px;text-align:right;">Çıkış</th><th style="padding:6px;text-align:right;">Kümülatif</th>
+    </tr>
+    {% for w in s.cash.weeks %}
+    <tr style="border-bottom:1px solid #dee2e6;{% if w.negative %}background:#f8d7da;{% endif %}">
+      <td style="padding:6px;">{{ w.label }}</td>
+      <td style="padding:6px;text-align:right;">{{ w.incoming|thousands }} ₺</td>
+      <td style="padding:6px;text-align:right;">{{ w.outgoing|thousands }} ₺</td>
+      <td style="padding:6px;text-align:right;font-weight:bold;{% if w.negative %}color:#dc3545;{% endif %}">{{ w.cumulative|thousands }} ₺</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p style="margin:6px 0 0 0;font-size:14px;">Net: <strong>{{ s.cash.total_net|thousands }} ₺</strong>
+    {% if s.cash.first_negative %}<span style="color:#dc3545;"> – kümülatif {{ s.cash.negative_count }} hafta eksiye düşüyor (ilk: {{ s.cash.first_negative.label }}).</span>{% endif %}
+    <a href="{{ site }}/cashflow">Nakit akışı</a></p>
+  <p style="margin:6px 0 0 0;font-size:12px;color:#6c757d;">Portföydeki çekler vade tarihinde beklenen para sayılır; bu bir tahmindir, borç kapatmaz. Karşılıksız çekler dahil değildir.</p>
+
+</div>
+</body>
+</html>
