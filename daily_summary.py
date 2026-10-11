@@ -2,15 +2,17 @@
 position for the next four weeks.
 
 Reading the data only uses SELECT. Nothing is written to the database. The
-mail server settings come from environment variables and are never kept in
-the code.
+mail goes out through the Brevo HTTP API, not through SMTP: the host blocks
+outgoing SMTP ports, and a blocked connection would freeze the only worker.
+The API key and the addresses come from environment variables and are never
+kept in the code.
 """
 import os
-import smtplib
-import ssl
+import re
 from datetime import timedelta
-from email.message import EmailMessage
+from email.utils import parseaddr
 
+import requests
 from flask import render_template
 
 from cashflow import ZERO, monday_of, load_expected_flows, build_cashflow
@@ -20,9 +22,19 @@ from overdue import load_overdue_installments, bucket_totals
 SUMMARY_WEEKS = 4
 
 # All of these must be set, or no mail is sent.
-MAIL_SETTINGS = ('SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASSWORD',
-                 'MAIL_TO')
-SMTP_TIMEOUT_SECONDS = 30
+MAIL_SETTINGS = ('BREVO_API_KEY', 'MAIL_FROM', 'MAIL_TO')
+
+BREVO_URL = 'https://api.brevo.com/v3/smtp/email'
+# Never wait longer than this for the mail API. Connecting and reading are
+# timed separately, so the worst case is about 15 seconds: well below the 30
+# seconds after which gunicorn kills a worker. No retries.
+CONNECT_TIMEOUT_SECONDS = 5
+READ_TIMEOUT_SECONDS = 10
+
+
+class MailSendError(Exception):
+    """The mail API did not take the mail. The text is safe to log: the API
+    key has been masked out of it."""
 
 
 def gather_summary(cur, today):
@@ -60,52 +72,75 @@ def gather_summary(cur, today):
 
 
 def read_mail_settings():
-    """(settings, missing). `settings` is None unless every value is usable."""
+    """(settings, missing). `settings` is None unless every value is usable.
+
+    MAIL_FROM is "Name <address>" or just an address; MAIL_TO is one address
+    or several separated by commas.
+    """
     values = {name: (os.getenv(name) or '').strip() for name in MAIL_SETTINGS}
     missing = [name for name, value in values.items() if not value]
-    try:
-        port = int(values['SMTP_PORT'])
-    except ValueError:
-        port = None
-        if 'SMTP_PORT' not in missing:
-            missing.append('SMTP_PORT')
-    if missing:
-        return None, missing
+
+    sender_name, sender_email = parseaddr(values['MAIL_FROM'])
+    if values['MAIL_FROM'] and '@' not in sender_email:
+        missing.append('MAIL_FROM')
     recipients = [a.strip() for a in values['MAIL_TO'].replace(';', ',').split(',')
                   if a.strip()]
-    if not recipients:
-        return None, ['MAIL_TO']
+    if values['MAIL_TO'] and not recipients:
+        missing.append('MAIL_TO')
+
+    if missing:
+        return None, missing
     return {
-        'host': values['SMTP_HOST'], 'port': port,
-        'user': values['SMTP_USER'], 'password': values['SMTP_PASSWORD'],
+        'api_key': values['BREVO_API_KEY'],
+        'sender_name': sender_name, 'sender_email': sender_email,
         'recipients': recipients,
     }, []
 
 
-def build_message(summary, sender, recipients, site_root):
-    message = EmailMessage()
-    message['Subject'] = 'Günlük Özet – %s' % summary['today'].strftime('%d.%m.%Y')
-    message['From'] = sender
-    message['To'] = ', '.join(recipients)
+def render_mail(summary, site_root):
+    """The subject and the two bodies, from the existing mail templates."""
     context = {'s': summary, 'site': site_root.rstrip('/')}
-    message.set_content(render_template('emails/daily_summary.txt', **context))
-    message.add_alternative(
-        render_template('emails/daily_summary.html', **context), subtype='html')
-    return message
+    return {
+        'subject': 'Günlük Özet – %s' % summary['today'].strftime('%d.%m.%Y'),
+        'text': render_template('emails/daily_summary.txt', **context),
+        'html': render_template('emails/daily_summary.html', **context),
+    }
 
 
-def send_message(message, settings):
-    """Send over TLS: port 465 is TLS from the start, anything else upgrades
-    with STARTTLS. Raises smtplib/OS errors; the caller logs them."""
-    context = ssl.create_default_context()
-    if settings['port'] == 465:
-        server = smtplib.SMTP_SSL(settings['host'], settings['port'],
-                                  timeout=SMTP_TIMEOUT_SECONDS, context=context)
-    else:
-        server = smtplib.SMTP(settings['host'], settings['port'],
-                              timeout=SMTP_TIMEOUT_SECONDS)
-    with server:
-        if settings['port'] != 465:
-            server.starttls(context=context)
-        server.login(settings['user'], settings['password'])
-        server.send_message(message)
+def build_payload(mail, settings):
+    """The JSON body the Brevo API expects."""
+    sender = {'email': settings['sender_email']}
+    if settings['sender_name']:
+        sender['name'] = settings['sender_name']
+    return {
+        'sender': sender,
+        'to': [{'email': address} for address in settings['recipients']],
+        'subject': mail['subject'],
+        'htmlContent': mail['html'],
+        'textContent': mail['text'],
+    }
+
+
+def mask_secret(text, secret):
+    """Hide the API key (and anything shaped like one) in text before it is
+    logged or put in an error."""
+    text = str(text)
+    if secret:
+        text = text.replace(secret, '***')
+    return re.sub(r'xkeysib-[\w-]+', '***', text)
+
+
+def send_mail(payload, api_key):
+    """Post the mail to Brevo. Raises MailSendError on any failure."""
+    headers = {'api-key': api_key, 'accept': 'application/json'}
+    try:
+        response = requests.post(
+            BREVO_URL, json=payload, headers=headers,
+            timeout=(CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS))
+    except requests.RequestException as exc:
+        # `from None`: do not carry the original exception along into logs.
+        raise MailSendError('%s: %s' % (
+            type(exc).__name__, mask_secret(exc, api_key))) from None
+    if not 200 <= response.status_code < 300:
+        raise MailSendError('Brevo answered HTTP %d: %s' % (
+            response.status_code, mask_secret(response.text[:300], api_key)))
