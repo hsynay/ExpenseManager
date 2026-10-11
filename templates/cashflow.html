@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+
+{% block title %}Nakit Akışı Öngörüsü{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold"><i class="fa-solid fa-chart-line me-2 text-primary"></i>Nakit Akışı Öngörüsü</h2>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Geri</a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, msg in messages %}<div class="alert alert-{{category}}">{{msg}}</div>{% endfor %}
+{% endwith %}
+
+<div class="card mb-4">
+    <div class="card-body">
+        <form class="row g-3 align-items-end" method="get" action="{{ url_for('cashflow') }}">
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">Dönem</label>
+                <select name="months" class="form-select">
+                    {% for m in period_choices %}
+                    <option value="{{ m }}" {% if m == months %}selected{% endif %}>{{ m }} ay</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Proje</label>
+                <select name="project_id" class="form-select">
+                    <option value="">Tüm projeler</option>
+                    {% for pid, pname in projects %}
+                    <option value="{{ pid }}" {% if selected_project_id == pid %}selected{% endif %}>{{ pname }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">Başlangıç bakiyesi (₺)</label>
+                <input type="text" name="opening" class="form-control" inputmode="decimal" placeholder="0" value="{{ opening_text }}">
+                <small class="text-muted">Kaydedilmez, sadece bu hesapta kullanılır.</small>
+            </div>
+            <div class="col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-filter me-1"></i>Hesapla</button>
+                <a href="{{ url_for('cashflow') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-refresh me-1"></i>Temizle</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body text-center p-3">
+        <div class="row gy-3">
+            <div class="col-md-3 border-end">
+                <h6 class="text-muted mb-1">BEKLENEN GİRİŞ</h6>
+                <h4 class="fw-bold text-success mb-0">{{ result.total_in|thousands }} ₺</h4>
+            </div>
+            <div class="col-md-3 border-end">
+                <h6 class="text-muted mb-1">BEKLENEN ÇIKIŞ</h6>
+                <h4 class="fw-bold text-danger mb-0">{{ result.total_out|thousands }} ₺</h4>
+            </div>
+            <div class="col-md-3 border-end">
+                <h6 class="text-muted mb-1">NET</h6>
+                <h4 class="fw-bold {{ 'text-success' if result.total_net >= 0 else 'text-danger' }} mb-0">{{ result.total_net|thousands }} ₺</h4>
+            </div>
+            <div class="col-md-3">
+                <h6 class="text-muted mb-1">DÖNEM SONU BAKİYE</h6>
+                <h4 class="fw-bold {{ 'text-primary' if result.closing >= 0 else 'text-danger' }} mb-0">{{ result.closing|thousands }} ₺</h4>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if result.first_negative %}
+<div class="alert alert-danger" id="negative-warning">
+    <i class="fa-solid fa-triangle-exclamation me-1"></i>
+    <strong>{{ result.negative_count }} hafta kümülatif bakiye eksiye düşüyor.</strong>
+    İlk sıkışma: {{ result.first_negative.label }}.
+    En düşük nokta: {{ result.lowest.cumulative|thousands }} ₺ ({{ result.lowest.label }}).
+</div>
+{% else %}
+<div class="alert alert-success" id="negative-warning">
+    <i class="fa-solid fa-circle-check me-1"></i>Bu dönemde kümülatif bakiye hiçbir hafta eksiye düşmüyor.
+</div>
+{% endif %}
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="fw-bold mb-3"><i class="fa-solid fa-chart-column me-2 text-primary"></i>Haftalık Giriş / Çıkış ve Kümülatif Net</h5>
+        <canvas id="cashflow-chart" height="110"></canvas>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white"><h5 class="mb-0">Hafta Hafta</h5></div>
+    <div class="card-body table-responsive p-0">
+        <table class="table table-hover align-middle table-sm mb-0" id="weekly-table">
+            <thead>
+                <tr>
+                    <th>Hafta (Pzt – Paz)</th>
+                    <th class="text-end">Giriş</th>
+                    <th class="text-end">Çıkış</th>
+                    <th class="text-end">Net</th>
+                    <th class="text-end">Kümülatif net</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if result.opening %}
+                <tr class="table-light">
+                    <td><em>Başlangıç bakiyesi</em></td><td></td><td></td><td></td>
+                    <td class="text-end fw-bold">{{ result.opening|thousands }} ₺</td>
+                </tr>
+                {% endif %}
+                {% for w in result.weeks %}
+                <tr class="{% if w.negative %}table-danger{% elif w.late %}table-warning{% endif %}">
+                    <td>{{ w.label }}</td>
+                    <td class="text-end">{{ w.incoming|thousands }} ₺
+                        {% if w.parts.installment or w.parts.check %}<div class="small text-muted">{% if w.parts.installment %}taksit {{ w.parts.installment|thousands }}{% endif %}{% if w.parts.installment and w.parts.check %} + {% endif %}{% if w.parts.check %}çek {{ w.parts.check|thousands }}{% endif %}</div>{% endif %}
+                    </td>
+                    <td class="text-end">{{ w.outgoing|thousands }} ₺
+                        {% if w.parts.expense or w.parts.outgoing_check %}<div class="small text-muted">{% if w.parts.expense %}gider {{ w.parts.expense|thousands }}{% endif %}{% if w.parts.expense and w.parts.outgoing_check %} + {% endif %}{% if w.parts.outgoing_check %}verilen çek {{ w.parts.outgoing_check|thousands }}{% endif %}</div>{% endif %}
+                    </td>
+                    <td class="text-end">{{ w.net|thousands }} ₺</td>
+                    <td class="text-end fw-bold {{ 'text-danger' if w.negative else '' }}">{{ w.cumulative|thousands }} ₺</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-secondary text-white"><h5 class="mb-0">Aylık Özet</h5></div>
+    <div class="card-body table-responsive p-0">
+        <table class="table table-hover align-middle table-sm mb-0" id="monthly-table">
+            <thead>
+                <tr>
+                    <th>Ay</th>
+                    <th class="text-end">Giriş</th>
+                    <th class="text-end">Çıkış</th>
+                    <th class="text-end">Net</th>
+                    <th class="text-end">Kümülatif net</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in result.months %}
+                <tr class="{% if m.negative %}table-danger{% elif m.late %}table-warning{% endif %}">
+                    <td>{{ m.label }}</td>
+                    <td class="text-end">{{ m.incoming|thousands }} ₺</td>
+                    <td class="text-end">{{ m.outgoing|thousands }} ₺</td>
+                    <td class="text-end">{{ m.net|thousands }} ₺</td>
+                    <td class="text-end fw-bold {{ 'text-danger' if m.negative else '' }}">{{ m.cumulative|thousands }} ₺</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="small text-muted mb-5">
+    <strong>Nasıl hesaplanır?</strong> Giriş: ödenmemiş taksitler (kalan tutar) ve portföydeki çekler (vade tarihinde).
+    Çıkış: ödenmemiş gider taksitleri ve verilmiş ama ödenmemiş çekler (vade tarihinde).
+    Bir çek bir taksit için verildiyse, aynı para iki kez sayılmasın diye çek tutarı o dairenin en eski açık taksitlerinden düşülür.
+    Karşılıksız çekler hesaba girmez. Bu bir tahmindir, hiçbir borcu kapatmaz.
+    Önceki haftalarda vadesi geçmiş ama hâlâ ödenmemiş kalemler "gecikmiş" satırında toplanır.
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    (function () {
+        const data = {{ chart|tojson }};
+        const canvas = document.getElementById('cashflow-chart');
+        if (!canvas || !window.Chart) return;
+        const money = v => Number(v).toLocaleString('tr-TR') + ' ₺';
+        new Chart(canvas, {
+            data: {
+                labels: data.labels,
+                datasets: [
+                    { type: 'bar', label: 'Giriş', data: data.incoming, backgroundColor: 'rgba(25, 135, 84, 0.7)' },
+                    { type: 'bar', label: 'Çıkış', data: data.outgoing, backgroundColor: 'rgba(220, 53, 69, 0.7)' },
+                    { type: 'line', label: 'Kümülatif net', data: data.cumulative, borderColor: '#0d6efd',
+                      backgroundColor: '#0d6efd', tension: 0.2, pointRadius: 3,
+                      pointBackgroundColor: data.cumulative.map(v => v < 0 ? '#dc3545' : '#0d6efd') }
+                ]
+            },
+            options: {
+                responsive: true,
+                interaction: { mode: 'index', intersect: false },
+                plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + money(c.parsed.y) } } },
+                scales: { y: { ticks: { callback: v => money(v) } } }
+            }
+        });
+    })();
+</script>
+{% endblock %}

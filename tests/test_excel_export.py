@@ -10,15 +10,31 @@ from decimal import Decimal
 from io import BytesIO
 from urllib.parse import quote
 
+import re
+from datetime import timezone
+from urllib.parse import unquote
+
 import pytest
 from openpyxl import load_workbook
 
 import app as app_module
-from excel_export import ExcelBook, TEXT, MONEY, DATE, XLSX_MIME
-from helpers import PAGE_SIZE
+import excel_export
+from excel_export import (
+    ExcelBook, TEXT, MONEY, DATE, XLSX_MIME, download_filename, ascii_fallback,
+    clean_name_part,
+)
+from helpers import PAGE_SIZE, today_istanbul
 
 D = Decimal
 JUNE = date(2026, 6, 15)
+
+
+def file_names(response):
+    """(ASCII filename, UTF-8 filename*) from the Content-Disposition header."""
+    header = response.headers['Content-Disposition']
+    ascii_name = re.search(r'filename="([^"]*)"', header).group(1)
+    utf8_name = unquote(re.search(r"filename\*=UTF-8''(\S+)$", header).group(1))
+    return ascii_name, utf8_name
 
 
 def download(client, url):
@@ -121,8 +137,9 @@ def test_payments_export_is_named_formatted_and_complete(client, factory,
     assert len(render_context.latest('payments.html')['payments']) == PAGE_SIZE
 
     response = download(client, '/payments/export' + args)
-    assert response.headers['Content-Disposition'] == (
-        'attachment; filename=payments_%s.xlsx' % date.today().isoformat())
+    assert file_names(response) == (
+        'PYTEST-xlsx-gelir_Odemeler_%s.xlsx' % today_istanbul().isoformat(),
+        'PYTEST-xlsx-gelir_Odemeler_%s.xlsx' % today_istanbul().isoformat())
     book = open_book(response)
     rows = data_rows(book, 'Gelirler')
 
@@ -423,3 +440,121 @@ def test_debts_export_of_a_cooperative_shows_only_what_was_paid(client, factory)
          'Blok: A, Kat: 1, No: 1', None, 200, None]]
     assert data_rows(book, 'Taksitler') == []
     assert len(data_rows(book, 'Ödemeler')) == 1
+
+
+# --- file names -------------------------------------------------------------
+
+OCT_7 = date(2026, 10, 7)
+
+
+@pytest.fixture
+def fixed_today(monkeypatch):
+    monkeypatch.setattr(excel_export, 'today_istanbul', lambda: OCT_7)
+    return OCT_7
+
+
+def test_istanbul_date_differs_from_utc_after_21_utc():
+    before_midnight = datetime(2026, 10, 6, 20, 59, tzinfo=timezone.utc)
+    after_midnight = datetime(2026, 10, 6, 21, 0, tzinfo=timezone.utc)
+
+    assert today_istanbul(before_midnight) == date(2026, 10, 6)
+    # 21:00 UTC is already 00:00 the next day in Istanbul.
+    assert today_istanbul(after_midnight) == date(2026, 10, 7)
+
+
+def test_filename_has_project_page_and_date(fixed_today):
+    assert download_filename('Giderler', 'Hayriye Mahallesi') == (
+        'Hayriye-Mahallesi_Giderler_2026-10-07.xlsx')
+    assert download_filename('Borclar', 'Hayriye Mahallesi', 'Daireler') == (
+        'Hayriye-Mahallesi_Borclar-Daireler_2026-10-07.xlsx')
+
+
+def test_filename_without_a_project_leaves_the_project_out(fixed_today):
+    assert download_filename('Cekler') == 'Cekler_2026-10-07.xlsx'
+    assert download_filename('Odemeler', '') == 'Odemeler_2026-10-07.xlsx'
+    assert download_filename('Odemeler', '  ') == 'Odemeler_2026-10-07.xlsx'
+
+
+def test_filename_keeps_turkish_letters_and_has_an_ascii_fallback(fixed_today):
+    name = download_filename('Giderler', 'Şişli Çınar Öğretmen Evleri İnşaat')
+
+    assert name == 'Şişli-Çınar-Öğretmen-Evleri-İnşaat_Giderler_2026-10-07.xlsx'
+    assert ascii_fallback(name) == (
+        'Sisli-Cinar-Ogretmen-Evleri-Insaat_Giderler_2026-10-07.xlsx')
+    assert ascii_fallback('Kızılay_ığüşöç.xlsx') == 'Kizilay_igusoc.xlsx'
+
+
+def test_filename_drops_forbidden_characters_and_extra_spaces():
+    dirty = 'A/B\C:D*E?F"G<H>I|J   K\tL\nM'
+
+    cleaned = clean_name_part(dirty, 60)
+
+    assert cleaned == 'ABCDEFGHIJ-K-L-M'
+    assert not set('\/:*?"<>|') & set(cleaned)
+
+
+def test_filename_is_cut_to_a_sensible_length(fixed_today):
+    name = download_filename('Giderler', 'Çok Uzun Proje Adı ' * 30)
+
+    assert len(name) < 120
+    assert name.endswith('_Giderler_2026-10-07.xlsx')
+    assert not name.startswith('-') and '-_' not in name
+
+
+def test_payments_download_with_a_project_names_the_file(client, factory,
+                                                         fixed_today):
+    project_id = factory.project('Şişli Çınar')
+    _, flat_id = owner_with_flat(factory, project_id, 'XlsxIsim')
+    factory.payment(flat_id, D('10'))
+    factory.commit()
+
+    response = download(client, '/payments/export?project='
+                        + quote('PYTEST Şişli Çınar'))
+
+    ascii_name, utf8_name = file_names(response)
+    assert utf8_name == 'PYTEST-Şişli-Çınar_Odemeler_2026-10-07.xlsx'
+    assert ascii_name == 'PYTEST-Sisli-Cinar_Odemeler_2026-10-07.xlsx'
+
+
+def test_downloads_without_a_project_have_no_project_in_the_name(client,
+                                                                 fixed_today):
+    assert file_names(download(client, '/payments/export'))[1] == (
+        'Odemeler_2026-10-07.xlsx')
+    assert file_names(download(client, '/checks/export'))[1] == (
+        'Cekler_2026-10-07.xlsx')
+    assert file_names(download(client, '/debts/export'))[1] == (
+        'Borclar_2026-10-07.xlsx')
+
+
+def test_debts_download_of_one_tab_puts_the_tab_in_the_name(client, factory,
+                                                            fixed_today):
+    project_id = factory.project('xlsx sekme')
+    _, flat_id = owner_with_flat(factory, project_id, 'XlsxSekme')
+    factory.installment(flat_id, JUNE, D('100'))
+    factory.commit()
+    base = '/debts/export?project_id=%d' % project_id
+
+    whole = download(client, base)
+    assert file_names(whole)[1] == 'PYTEST-xlsx-sekme_Borclar_2026-10-07.xlsx'
+    assert open_book(whole).sheetnames == [
+        'Projeler', 'Daireler', 'Taksitler', 'Ödemeler']
+
+    one = download(client, base + '&sheet=taksitler')
+    assert file_names(one)[1] == (
+        'PYTEST-xlsx-sekme_Borclar-Taksitler_2026-10-07.xlsx')
+    assert open_book(one).sheetnames == ['Taksitler']
+
+    unknown = download(client, base + '&sheet=yok-boyle-sekme')
+    assert len(open_book(unknown).sheetnames) == 4
+
+
+def test_expenses_download_names_project_and_tab(client, factory, fixed_today):
+    project_id, _, _ = expense_project(factory)
+    base = '/expenses/export?project_id=%d' % project_id
+
+    assert file_names(download(client, base))[1] == (
+        'PYTEST-xlsx-gider_Giderler_2026-10-07.xlsx')
+    petty = download(client, base + '&sheet=kucuk-giderler')
+    assert file_names(petty)[1] == (
+        'PYTEST-xlsx-gider_Giderler-Kucuk-Giderler_2026-10-07.xlsx')
+    assert open_book(petty).sheetnames == ['Küçük Giderler']

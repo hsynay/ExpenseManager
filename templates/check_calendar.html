@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Çek Takvimi{% endblock %}
+
+{% set status_labels = {'portfoyde': 'Portföyde', 'verildi': 'Verildi', 'karsiliksiz': 'Karşılıksız'} %}
+
+{# One table of checks. Every row links to the check on the /checks page,
+   narrowed to the same party, status and due date so it is on the first page. #}
+{% macro check_table(rows, table_id, row_class='') %}
+<div class="card-body table-responsive p-0">
+    <table class="table table-hover align-middle table-sm mb-0" id="{{ table_id }}">
+        <thead>
+            <tr>
+                <th>Vade</th>
+                <th>Tip</th>
+                <th>Kişi / Firma</th>
+                <th>Proje</th>
+                <th class="text-end">Tutar</th>
+                <th class="text-center">Durum</th>
+                <th class="text-center">Çek</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in rows %}
+            <tr class="{{ row_class }}">
+                <td>{{ c.due_date.strftime('%d.%m.%Y') }}</td>
+                <td>
+                    {% if c.kind == 'in' %}<span class="badge bg-success">Alınan</span>
+                    {% else %}<span class="badge bg-danger">Verilen</span>{% endif %}
+                </td>
+                <td>{{ c.party or '-' }}</td>
+                <td>{{ c.project_name or '-' }}</td>
+                <td class="text-end fw-bold">{{ c.amount|thousands }} ₺</td>
+                <td class="text-center">{{ status_labels.get(c.status, c.status) }}</td>
+                <td class="text-center">
+                    {% if c.kind == 'in' %}
+                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('list_checks', in_customer=c.party or None, in_status=c.status, in_due_from=c.due_date.isoformat(), in_due_to=c.due_date.isoformat()) }}#chk-in-{{ c.id }}" title="Çek listesinde göster"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                    {% else %}
+                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('list_checks', out_supplier=c.party or None, out_status=c.status, out_due_from=c.due_date.isoformat(), out_due_to=c.due_date.isoformat()) }}#chk-out-{{ c.id }}" title="Çek listesinde göster"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-center text-muted p-3">Bu bölümde çek yok.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endmacro %}
+
+{% block content %}
+{% set sections = grouped.sections %}
+{% set totals = grouped.totals %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold"><i class="fa-solid fa-calendar-days me-2 text-primary"></i>Çek Takvimi</h2>
+    <a href="{{ url_for('list_checks') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-money-check-dollar me-1"></i>Çek Defteri</a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, msg in messages %}<div class="alert alert-{{category}}">{{msg}}</div>{% endfor %}
+{% endwith %}
+
+<div class="row g-3 mb-4" id="calendar-boxes">
+    <div class="col-md-3">
+        <div class="card h-100 border-danger"><div class="card-body text-center">
+            <h6 class="text-muted mb-1">VADESİ GEÇMİŞ ALACAK</h6>
+            <h4 class="fw-bold text-danger mb-0" id="box-overdue-in">{{ totals.overdue_in|thousands }} ₺</h4>
+            <small class="text-muted">Alınan, portföyde</small>
+        </div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100 border-danger"><div class="card-body text-center">
+            <h6 class="text-muted mb-1">VADESİ GEÇMİŞ BORÇ</h6>
+            <h4 class="fw-bold text-danger mb-0" id="box-overdue-out">{{ totals.overdue_out|thousands }} ₺</h4>
+            <small class="text-muted">Verilen, ödenmemiş</small>
+        </div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100 border-success"><div class="card-body text-center">
+            <h6 class="text-muted mb-1">BU HAFTA GİRECEK</h6>
+            <h4 class="fw-bold text-success mb-0" id="box-week-in">{{ totals.week_in|thousands }} ₺</h4>
+            <small class="text-muted">{{ today.strftime('%d.%m.%Y') }} – {{ grouped.week_end.strftime('%d.%m.%Y') }}</small>
+        </div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100 border-warning"><div class="card-body text-center">
+            <h6 class="text-muted mb-1">BU HAFTA ÇIKACAK</h6>
+            <h4 class="fw-bold text-warning mb-0" id="box-week-out">{{ totals.week_out|thousands }} ₺</h4>
+            <small class="text-muted">{{ today.strftime('%d.%m.%Y') }} – {{ grouped.week_end.strftime('%d.%m.%Y') }}</small>
+        </div></div>
+    </div>
+</div>
+
+<div class="card mb-4 border-danger">
+    <div class="card-header bg-danger text-white"><h5 class="mb-0">Vadesi Geçmiş <span class="badge bg-light text-dark">{{ sections.overdue|length }}</span></h5></div>
+    {{ check_table(sections.overdue, 'tbl-overdue', 'table-warning') }}
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white"><h5 class="mb-0">Bu Hafta <span class="badge bg-light text-dark">{{ sections.week|length }}</span></h5></div>
+    {{ check_table(sections.week, 'tbl-week') }}
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-secondary text-white"><h5 class="mb-0">Bu Ay <span class="badge bg-light text-dark">{{ sections.month|length }}</span></h5></div>
+    {{ check_table(sections.month, 'tbl-month') }}
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-dark text-white"><h5 class="mb-0">Sonraki <span class="badge bg-light text-dark">{{ sections.later|length }}</span></h5></div>
+    {{ check_table(sections.later, 'tbl-later') }}
+</div>
+
+<div class="card mb-5">
+    <div class="card-header">
+        <a class="text-decoration-none text-danger fw-bold" data-bs-toggle="collapse" href="#bounced-section" role="button" aria-expanded="false" aria-controls="bounced-section">
+            <i class="fa-solid fa-ban me-1"></i>Karşılıksız çekler ({{ grouped.bounced|length }}) – hiçbir toplamda sayılmaz
+        </a>
+    </div>
+    <div class="collapse" id="bounced-section">
+        {{ check_table(grouped.bounced, 'tbl-bounced', 'table-danger') }}
+    </div>
+</div>
+{% endblock %}
