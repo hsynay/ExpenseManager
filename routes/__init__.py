@@ -8,3 +8,5 @@ from routes import expenses  # noqa: F401
 from routes import checks  # noqa: F401
 from routes import reports  # noqa: F401
 from routes import exports  # noqa: F401
+from routes import forecast  # noqa: F401
+from routes import tasks  # noqa: F401

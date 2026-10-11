@@ -1,0 +1,28 @@
+GÜNLÜK ÖZET - {{ s.today.strftime('%d.%m.%Y') }}
+
+{% for block, title in ((s.due_today, 'BUGÜN VADESİ GELEN ÇEKLER'), (s.due_tomorrow, 'YARIN VADESİ GELEN ÇEKLER')) -%}
+{{ title }} ({{ block.day.strftime('%d.%m.%Y') }})
+{% for c in block.checks -%}
+- {{ 'Alınan' if c.kind == 'in' else 'Verilen' }} | {{ c.party or '-' }} | {{ c.project_name or '-' }} | {{ c.amount|thousands }} TL
+{% else -%}
+Vadesi gelen çek yok.
+{% endfor -%}
+Girecek: {{ block.incoming|thousands }} TL, Çıkacak: {{ block.outgoing|thousands }} TL
+
+{% endfor -%}
+VADESİ GEÇMİŞ TAKSİTLER
+{% if s.late_customers -%}
+Toplam {{ s.late_total|thousands }} TL, {{ s.late_customers }} müşteri, en eski gecikme {{ s.late_oldest_days }} gün.
+{{ site }}/overdue
+{%- else -%}
+Vadesi geçmiş taksit yok.
+{%- endif %}
+
+ÖNÜMÜZDEKİ {{ s.weeks }} HAFTA NAKİT DURUMU
+{% for w in s.cash.weeks -%}
+{{ w.label }}: giriş {{ w.incoming|thousands }}, çıkış {{ w.outgoing|thousands }}, kümülatif {{ w.cumulative|thousands }} TL{% if w.negative %}  (EKSİ){% endif %}
+{% endfor -%}
+Net: {{ s.cash.total_net|thousands }} TL
+{{ site }}/cashflow
+
+Portföydeki çekler vade tarihinde beklenen para sayılır; bu bir tahmindir. Karşılıksız çekler dahil değildir.
