@@ -94,10 +94,14 @@
                 -->
 
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['reports', 'select_project_for_coop_report'] %}active{% endif %}" href="#" id="reportsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fa-solid fa-chart-pie me-1"></i> Raporlar</a>
+                    <a class="nav-link dropdown-toggle {% if request.endpoint in ['reports', 'select_project_for_coop_report', 'cashflow', 'check_calendar', 'overdue_report'] %}active{% endif %}" href="#" id="reportsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fa-solid fa-chart-pie me-1"></i> Raporlar</a>
                     <ul class="dropdown-menu" aria-labelledby="reportsDropdown">
                         <li><a class="dropdown-item" href="{{ url_for('reports') }}">Proje Raporları</a></li>
                         <li><a class="dropdown-item" href="{{ url_for('select_project_for_coop_report') }}">Kooperatif Aylık Raporu</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="{{ url_for('cashflow') }}">Nakit Akışı Öngörüsü</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('check_calendar') }}">Çek Takvimi</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('overdue_report') }}">Gecikme Raporu</a></li>
                         </ul>
                 </li>
 

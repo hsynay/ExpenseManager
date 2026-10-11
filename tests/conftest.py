@@ -132,9 +132,11 @@ class Factory:
             'flat_no': flat_no, 'floor': floor, 'block_name': block_name,
             'total_price': total_price})
 
-    def installment(self, flat_id, due_date, amount):
+    def installment(self, flat_id, due_date, amount, paid_amount=0,
+                    is_paid=False):
         return self._insert('installment_schedule', {
-            'flat_id': flat_id, 'due_date': due_date, 'amount': amount})
+            'flat_id': flat_id, 'due_date': due_date, 'amount': amount,
+            'paid_amount': paid_amount, 'is_paid': is_paid})
 
     def check(self, customer_id, amount, status='portfoyde',
               due_date=None, issue_date=None):
@@ -167,9 +169,11 @@ class Factory:
             'title': PREFIX + title, 'amount': amount,
             'expense_date': expense_date or TODAY})
 
-    def expense_installment(self, expense_id, due_date, amount):
+    def expense_installment(self, expense_id, due_date, amount, paid_amount=0,
+                            is_paid=False):
         return self._insert('expense_schedule', {
-            'expense_id': expense_id, 'due_date': due_date, 'amount': amount})
+            'expense_id': expense_id, 'due_date': due_date, 'amount': amount,
+            'paid_amount': paid_amount, 'is_paid': is_paid})
 
     def outgoing_check(self, supplier_id, amount, status='verildi',
                        due_date=None, issue_date=None):
@@ -299,3 +303,40 @@ def client(user_id):
             sess['user_id'] = user_id
             sess['user_name'] = 'pytest'
         yield c
+
+
+class CountingCursor:
+    """Wraps a cursor and writes every SQL text it executes into a list."""
+
+    def __init__(self, cursor, sink):
+        self._cursor = cursor
+        self._sink = sink
+
+    def execute(self, sql, *args, **kwargs):
+        self._sink.append(sql)
+        return self._cursor.execute(sql, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+    def __enter__(self):
+        self._cursor.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        return self._cursor.__exit__(*exc)
+
+
+@pytest.fixture
+def query_counter(monkeypatch):
+    """A list that fills with the SQL of every query the app runs.
+
+    Call .clear() right before the request you want to measure, because the
+    factory's own queries are counted too.
+    """
+    sink = []
+    monkeypatch.setattr(
+        db.PooledConnection, 'cursor',
+        lambda self, *a, **k: CountingCursor(self._raw.cursor(*a, **k), sink),
+        raising=False)
+    return sink

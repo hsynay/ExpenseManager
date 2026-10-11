@@ -18,7 +18,21 @@
     <div>
         {% if detailed_view %}
             <a href="{{ url_for('add_expense', project_id=project_id) }}" class="btn btn-primary"><i class="fa-solid fa-plus me-1"></i>Yeni Planlı Gider</a>
-            <a href="{{ url_for('export_expenses') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}" class="btn btn-success"><i class="fa-solid fa-file-excel me-1"></i>Excel indir</a>
+            {# Same filters as the page; ?sheet= picks a single tab. #}
+            {% set export_query = request.query_string.decode() %}
+            {% set export_all = url_for('export_expenses') ~ ('?' ~ export_query if export_query else '') %}
+            {% set export_base = url_for('export_expenses') ~ '?' ~ (export_query ~ '&' if export_query else '') ~ 'sheet=' %}
+            <div class="btn-group">
+                <a href="{{ export_all }}" class="btn btn-success"><i class="fa-solid fa-file-excel me-1"></i>Excel indir</a>
+                <button type="button" class="btn btn-success dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false"><span class="visually-hidden">Tek sekme indir</span></button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><h6 class="dropdown-header">Yalnızca bir sekme</h6></li>
+                    <li><a class="dropdown-item" href="{{ export_base }}buyuk-giderler">Büyük Giderler</a></li>
+                    <li><a class="dropdown-item" href="{{ export_base }}taksitler">Gider Taksitleri</a></li>
+                    <li><a class="dropdown-item" href="{{ export_base }}odemeler">Gider Ödemeleri</a></li>
+                    <li><a class="dropdown-item" href="{{ export_base }}kucuk-giderler">Küçük Giderler</a></li>
+                </ul>
+            </div>
         {% endif %}
         <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Geri</a>
     </div>

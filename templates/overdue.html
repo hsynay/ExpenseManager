@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Gecikme Raporu{% endblock %}
+
+{# One aging table. A customer name links to that customer's record on /debts:
+   straight to the flat when only one flat is late, otherwise a name search. #}
+{% macro aging_table(rows, totals, table_id, with_link) %}
+<div class="card-body table-responsive p-0">
+    <table class="table table-hover align-middle table-sm mb-0" id="{{ table_id }}">
+        <thead>
+            <tr>
+                <th>Müşteri</th>
+                {% for key, label in buckets %}<th class="text-end">{{ label }}</th>{% endfor %}
+                <th class="text-end">Toplam</th>
+                <th class="text-end">En eski</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td>
+                    {% if with_link and r.customer_id %}
+                        {% if r.flat_count == 1 %}
+                        <a href="{{ url_for('debt_status', project_id=r.project_id, flat_id=r.flat_id) }}#flat-{{ r.flat_id }}">{{ r.name }}</a>
+                        {% else %}
+                        <a href="{{ url_for('debt_status', search=r.name) }}">{{ r.name }}</a>
+                        <small class="text-muted">({{ r.flat_count }} daire)</small>
+                        {% endif %}
+                    {% elif r.customer_id %}
+                        <a href="{{ url_for('debt_status', search=r.name) }}">{{ r.name }}</a>
+                    {% else %}
+                        {{ r.name }}
+                    {% endif %}
+                </td>
+                {% for key, label in buckets %}
+                <td class="text-end {% if key == 'b90_plus' and r[key] %}text-danger fw-bold{% endif %}">{{ r[key]|thousands if r[key] else '-' }}{% if r[key] %} ₺{% endif %}</td>
+                {% endfor %}
+                <td class="text-end fw-bold">{{ r.total|thousands }} ₺</td>
+                <td class="text-end text-muted">{{ r.oldest_days }} gün</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-center text-muted p-3">Vadesi geçmiş kayıt yok.</td></tr>
+            {% endfor %}
+        </tbody>
+        {% if rows %}
+        <tfoot class="table-light">
+            <tr class="fw-bold">
+                <td>Toplam</td>
+                {% for key, label in buckets %}<td class="text-end">{{ totals[key]|thousands }} ₺</td>{% endfor %}
+                <td class="text-end">{{ totals.total|thousands }} ₺</td>
+                <td></td>
+            </tr>
+        </tfoot>
+        {% endif %}
+    </table>
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold"><i class="fa-solid fa-hourglass-half me-2 text-danger"></i>Gecikme Raporu</h2>
+    <a href="{{ url_for('debt_status') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-file-invoice-dollar me-1"></i>Borç Defteri</a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, msg in messages %}<div class="alert alert-{{category}}">{{msg}}</div>{% endfor %}
+{% endwith %}
+
+<p class="text-muted">{{ today.strftime('%d.%m.%Y') }} itibarıyla vadesi geçmiş, ödenmemiş taksitler. En çok geciken müşteri en üstte.</p>
+
+<div class="row g-3 mb-4" id="aging-boxes">
+    {% for key, label in buckets %}
+    <div class="col-6 col-md">
+        <div class="card h-100"><div class="card-body text-center">
+            <h6 class="text-muted mb-1">{{ label }}</h6>
+            <h5 class="fw-bold mb-0 {% if key == 'b90_plus' and installment_totals[key] %}text-danger{% endif %}">{{ installment_totals[key]|thousands }} ₺</h5>
+        </div></div>
+    </div>
+    {% endfor %}
+    <div class="col-12 col-md">
+        <div class="card h-100 border-danger"><div class="card-body text-center">
+            <h6 class="text-muted mb-1">TOPLAM GECİKEN</h6>
+            <h5 class="fw-bold text-danger mb-0" id="aging-total">{{ installment_totals.total|thousands }} ₺</h5>
+        </div></div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-danger text-white"><h5 class="mb-0">Geciken Taksitler <span class="badge bg-light text-dark">{{ installments|length }} müşteri</span></h5></div>
+    {{ aging_table(installments, installment_totals, 'tbl-installments', true) }}
+</div>
+
+<div class="card mb-5">
+    <div class="card-header bg-warning"><h5 class="mb-0">Vadesi Geçmiş, Portföydeki Çekler <span class="badge bg-light text-dark">{{ checks|length }} müşteri</span></h5></div>
+    {{ aging_table(checks, check_totals, 'tbl-checks', false) }}
+    <div class="card-footer small text-muted">
+        Portföydeki çek, tahsil edildi diye işaretlenene kadar borcu kapatmaz. Bu yüzden aynı para yukarıdaki taksitlerde de görünebilir; iki toplam birbirine eklenmez.
+        Karşılıksız çekler bu raporda yoktur.
+    </div>
+</div>
+{% endblock %}

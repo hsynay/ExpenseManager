@@ -41,6 +41,19 @@ def _flat_label(block_name, floor, flat_no):
     return 'Blok: %s, Kat: %s, No: %s' % (block_name or 'N/A', floor, flat_no)
 
 
+def _write_sheets(book, sheets, wanted_slug):
+    """Add the sheets to the book. Returns the name for the file name.
+
+    With ?sheet=<slug> only that sheet is written and its name is returned, so
+    the file name says which part it holds. An unknown slug, or none at all,
+    writes every sheet and returns None.
+    """
+    chosen = [s for s in sheets if s[0] == wanted_slug]
+    for _slug, _file_label, title, columns, rows in (chosen or sheets):
+        book.add_sheet(title, columns, rows)
+    return chosen[0][1] if chosen else None
+
+
 @app.route('/payments/export')
 @login_required
 def export_payments():
@@ -71,7 +84,7 @@ def export_payments():
 
     book = ExcelBook()
     book.add_sheet('Gelirler', columns, rows)
-    return book.response('payments')
+    return book.response('Odemeler', project_name=request.args.get('project'))
 
 
 @app.route('/checks/export')
@@ -113,7 +126,7 @@ def export_checks():
                    check_rows(incoming))
     book.add_sheet('Verilen Çekler', check_columns('Verilen Kişi / Kurum'),
                    check_rows(outgoing))
-    return book.response('checks')
+    return book.response('Cekler')
 
 
 @app.route('/expenses/export')
@@ -138,9 +151,11 @@ def export_expenses():
     cur = conn.cursor()
     try:
         cur.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
-        if not cur.fetchone():
+        project_row = cur.fetchone()
+        if not project_row:
             flash('Proje bulunamadı.', 'danger')
             return redirect(url_for('list_expenses'))
+        project_name = project_row[0]
 
         cards, petty_items = [], []
         if expense_type in ('all', 'large'):
@@ -161,7 +176,7 @@ def export_expenses():
         cur.close()
         conn.close()
 
-    book = ExcelBook()
+    sheets = []     # (slug, name in the file name, sheet title, columns, rows)
     if expense_type in ('all', 'large'):
         expense_rows, installment_rows, payment_rows = [], [], []
         for card in cards:
@@ -180,27 +195,33 @@ def export_expenses():
                     _check_status_label(method, status), bank_name,
                     check_number, check_due, amount])
 
-        book.add_sheet('Büyük Giderler',
-                       [('Gider', TEXT), ('Tedarikçi', TEXT),
-                        ('Toplam Borç', MONEY), ('Toplam Ödenen', MONEY),
-                        ('Kalan Borç', MONEY)], expense_rows)
-        book.add_sheet('Gider Taksitleri',
-                       [('Gider', TEXT), ('Tedarikçi', TEXT),
-                        ('Vade Tarihi', DATE), ('Taksit Tutarı', MONEY),
-                        ('Kalan', MONEY), ('Durum', TEXT)], installment_rows)
-        book.add_sheet('Gider Ödemeleri',
-                       [('Gider', TEXT), ('Tedarikçi', TEXT),
-                        ('Ödeme Tarihi', DATE), ('Açıklama', TEXT),
-                        ('Yöntem', TEXT), ('Çek Durumu', TEXT),
-                        ('Banka', TEXT), ('Çek No', TEXT),
-                        ('Çek Vadesi', DATE), ('Tutar', MONEY)], payment_rows)
+        sheets.append((
+            'buyuk-giderler', 'Buyuk-Giderler', 'Büyük Giderler',
+            [('Gider', TEXT), ('Tedarikçi', TEXT),
+             ('Toplam Borç', MONEY), ('Toplam Ödenen', MONEY),
+             ('Kalan Borç', MONEY)], expense_rows))
+        sheets.append((
+            'taksitler', 'Taksitler', 'Gider Taksitleri',
+            [('Gider', TEXT), ('Tedarikçi', TEXT),
+             ('Vade Tarihi', DATE), ('Taksit Tutarı', MONEY),
+             ('Kalan', MONEY), ('Durum', TEXT)], installment_rows))
+        sheets.append((
+            'odemeler', 'Odemeler', 'Gider Ödemeleri',
+            [('Gider', TEXT), ('Tedarikçi', TEXT),
+             ('Ödeme Tarihi', DATE), ('Açıklama', TEXT),
+             ('Yöntem', TEXT), ('Çek Durumu', TEXT),
+             ('Banka', TEXT), ('Çek No', TEXT),
+             ('Çek Vadesi', DATE), ('Tutar', MONEY)], payment_rows))
     if expense_type in ('all', 'petty'):
-        book.add_sheet('Küçük Giderler',
-                       [('Tarih', DATE), ('Açıklama', TEXT), ('Tutar', MONEY)],
-                       [[spent_on, title, amount]
-                        for _id, title, amount, spent_on, _description
-                        in petty_items])
-    return book.response('expenses')
+        sheets.append((
+            'kucuk-giderler', 'Kucuk-Giderler', 'Küçük Giderler',
+            [('Tarih', DATE), ('Açıklama', TEXT), ('Tutar', MONEY)],
+            [[spent_on, title, amount]
+             for _id, title, amount, spent_on, _description in petty_items]))
+    book = ExcelBook()
+    sub_sheet = _write_sheets(book, sheets, request.args.get('sheet'))
+    return book.response('Giderler', project_name=project_name,
+                         sub_sheet=sub_sheet)
 
 
 @app.route('/debts/export')
@@ -255,25 +276,24 @@ def export_debts():
                     check_number, check_due, amount])
 
     who_columns = [('Proje', TEXT), ('Müşteri', TEXT), ('Daire', TEXT)]
+    sheets = [
+        ('projeler', 'Projeler', 'Projeler',
+         [('Proje', TEXT), ('Proje Türü', TEXT),
+          ('Proje Toplam Geliri', MONEY), ('Tahsil Edilen Gelir', MONEY),
+          ('Kalan Alacak', MONEY)], project_rows),
+        ('daireler', 'Daireler', 'Daireler',
+         who_columns + [('Toplam Borç', MONEY), ('Toplam Ödenen', MONEY),
+                        ('Kalan Borç', MONEY)], flat_rows),
+        ('taksitler', 'Taksitler', 'Taksitler',
+         who_columns + [('Vade Tarihi', DATE), ('Taksit Tutarı', MONEY),
+                        ('Kalan', MONEY), ('Durum', TEXT)], installment_rows),
+        ('odemeler', 'Odemeler', 'Ödemeler',
+         who_columns + [('Ödeme Tarihi', DATE), ('Açıklama', TEXT),
+                        ('Yöntem', TEXT), ('Çek Durumu', TEXT),
+                        ('Banka', TEXT), ('Çek No', TEXT),
+                        ('Çek Vadesi', DATE), ('Tutar', MONEY)], payment_rows),
+    ]
     book = ExcelBook()
-    book.add_sheet('Projeler',
-                   [('Proje', TEXT), ('Proje Türü', TEXT),
-                    ('Proje Toplam Geliri', MONEY),
-                    ('Tahsil Edilen Gelir', MONEY),
-                    ('Kalan Alacak', MONEY)], project_rows)
-    book.add_sheet('Daireler',
-                   who_columns + [('Toplam Borç', MONEY),
-                                  ('Toplam Ödenen', MONEY),
-                                  ('Kalan Borç', MONEY)], flat_rows)
-    book.add_sheet('Taksitler',
-                   who_columns + [('Vade Tarihi', DATE),
-                                  ('Taksit Tutarı', MONEY),
-                                  ('Kalan', MONEY), ('Durum', TEXT)],
-                   installment_rows)
-    book.add_sheet('Ödemeler',
-                   who_columns + [('Ödeme Tarihi', DATE),
-                                  ('Açıklama', TEXT), ('Yöntem', TEXT),
-                                  ('Çek Durumu', TEXT), ('Banka', TEXT),
-                                  ('Çek No', TEXT), ('Çek Vadesi', DATE),
-                                  ('Tutar', MONEY)], payment_rows)
-    return book.response('debts')
+    sub_sheet = _write_sheets(book, sheets, request.args.get('sheet'))
+    return book.response('Borclar', project_name=data['selected_project_name'],
+                         sub_sheet=sub_sheet)
