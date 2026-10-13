@@ -9,6 +9,7 @@ from datetime import date
 import json
 from decimal import Decimal
 from core import app
+from expense_plan import PLAN_AMOUNT, PLAN_JOIN
 from helpers import login_required, json_login_required
 
 
@@ -108,13 +109,17 @@ def cooperative_report(project_id, year, month):
         """, (project_id, start_date))
         total_income_before = cur.fetchone()[0]
 
-        # Önceki aydan devreden giderler her iki tablodan toplanıyor
+        # Expenses paid before this month. They come from the real payments
+        # (supplier_payments), by payment date: cash, or a check marked
+        # 'odendi'. expenses.payment_method is not used: nothing fills it, so
+        # it always says 'nakit' and every expense would look paid.
         cur.execute("""
-            SELECT COALESCE(SUM(e.amount), 0)
-            FROM expenses e
-            LEFT JOIN outgoing_checks oc ON e.outgoing_check_id = oc.id
-            WHERE e.project_id = %s AND e.expense_date < %s
-              AND (e.payment_method = 'nakit' OR oc.status = 'odendi')
+            SELECT COALESCE(SUM(sp.amount), 0)
+            FROM supplier_payments sp
+            JOIN expenses e ON sp.expense_id = e.id
+            LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
+            WHERE e.project_id = %s AND sp.payment_date < %s
+              AND (sp.payment_method = 'nakit' OR oc.status = 'odendi')
         """, (project_id, start_date))
         total_large_expense_before = cur.fetchone()[0]
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s AND expense_date < %s", (project_id, start_date))
@@ -137,13 +142,15 @@ def cooperative_report(project_id, year, month):
         current_income = cur.fetchone()[0]
         report_data['current_income'] = current_income
 
-        # Rapor ayına ait giderler her iki tablodan toplanıyor
+        # Expenses paid in the report month: same source and same rule as
+        # above (and as project_overview).
         cur.execute("""
-            SELECT COALESCE(SUM(e.amount), 0)
-            FROM expenses e
-            LEFT JOIN outgoing_checks oc ON e.outgoing_check_id = oc.id
-            WHERE e.project_id = %s AND e.expense_date BETWEEN %s AND %s
-              AND (e.payment_method = 'nakit' OR oc.status = 'odendi')
+            SELECT COALESCE(SUM(sp.amount), 0)
+            FROM supplier_payments sp
+            JOIN expenses e ON sp.expense_id = e.id
+            LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
+            WHERE e.project_id = %s AND sp.payment_date BETWEEN %s AND %s
+              AND (sp.payment_method = 'nakit' OR oc.status = 'odendi')
         """, (project_id, start_date, end_date))
         current_large_expense = cur.fetchone()[0]
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s AND expense_date BETWEEN %s AND %s", (project_id, start_date, end_date))
@@ -154,6 +161,43 @@ def cooperative_report(project_id, year, month):
         # 3. Ay Sonu Bakiyesini Hesapla
         end_of_month_balance = previous_balance + current_income - current_expense
         report_data['end_of_month_balance'] = end_of_month_balance
+
+        # 3b. Remaining commitment at the end of the month. Same idea as
+        # "Taahhüt" on the profitability screen: what the expense plan says we
+        # will pay, minus what was really paid. Only expenses that already
+        # existed at month end (expense_date) and payments made by then count,
+        # so an old month still reads as it did at the time. A check that was
+        # handed over but is not 'odendi' yet is inside this number (it closed
+        # nothing); it is shown on its own line and never added on top.
+        #
+        # The plan of an expense is the sum of its installments. An expense
+        # that has no installments at all would vanish from this number, and
+        # an unpaid expense must never disappear from the report, so for it
+        # the expense amount itself is the plan.
+        cur.execute("""
+            SELECT COALESCE(SUM({plan}), 0)
+            FROM expenses e
+            {plan_join}
+            WHERE e.project_id = %s AND e.expense_date <= %s
+        """.format(plan=PLAN_AMOUNT, plan_join=PLAN_JOIN),
+                    (project_id, end_date))
+        planned_to_date = cur.fetchone()[0]
+        cur.execute("""
+            SELECT COALESCE(SUM(sp.amount) FILTER (
+                       WHERE sp.payment_method = 'nakit' OR oc.status = 'odendi'), 0),
+                   COALESCE(SUM(sp.amount) FILTER (
+                       WHERE oc.status = 'verildi'), 0)
+            FROM supplier_payments sp
+            JOIN expenses e ON sp.expense_id = e.id
+            LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
+            WHERE e.project_id = %s AND e.expense_date <= %s
+              AND sp.payment_date <= %s
+        """, (project_id, end_date, end_date))
+        paid_on_plan, handed_checks = cur.fetchone()
+        report_data['planned_to_date'] = planned_to_date
+        report_data['paid_on_plan'] = paid_on_plan
+        report_data['remaining_commitment'] = planned_to_date - paid_on_plan
+        report_data['handed_checks'] = handed_checks
 
         # 4. Detaylı listeler için verileri çek
         #
@@ -209,31 +253,40 @@ def cooperative_report(project_id, year, month):
         report_data['income_collected'] = income_collected
         report_data['income_pending'] = income_pending
 
-        # Gider detayları listesi her iki tablodan birleştirilip tarihe göre sıralanıyor
+        # The expense list is the list of real payments made in the month
+        # (supplier_payments, by payment date), like the income list above.
+        # A payment is money that moved only when it is cash or its check is
+        # 'odendi'; this is the same test as in the totals above, so the rows
+        # and the totals cannot disagree.
         cur.execute("""
-            SELECT e.expense_date, e.title, s.name, e.description, e.amount,
-                   e.payment_method, oc.status
-            FROM expenses e
+            SELECT sp.payment_date, e.title, s.name, sp.description, sp.amount,
+                   sp.payment_method, oc.status, e.amount
+            FROM supplier_payments sp
+            JOIN expenses e ON sp.expense_id = e.id
             LEFT JOIN suppliers s ON e.supplier_id = s.id
-            LEFT JOIN outgoing_checks oc ON e.outgoing_check_id = oc.id
-            WHERE e.project_id = %s AND e.expense_date BETWEEN %s AND %s
+            LEFT JOIN outgoing_checks oc ON sp.check_id = oc.id
+            WHERE e.project_id = %s AND sp.payment_date BETWEEN %s AND %s
         """, (project_id, start_date, end_date))
 
         expense_details = []
         expense_paid = Decimal(0)
         expense_pending = Decimal(0)
         for (exp_date, title, supplier_name, description, amount, method,
-             check_status) in cur.fetchall():
+             check_status, expense_amount) in cur.fetchall():
             amount = amount or Decimal(0)
 
-            if method == 'çek' and check_status == 'karsiliksiz':
+            if method == 'nakit' or check_status == 'odendi':
+                status_text, status_class, counts = 'Ödendi', 'success', True
+                expense_paid += amount
+            elif check_status == 'karsiliksiz':
                 status_text, status_class, counts = 'Karşılıksız', 'danger', False
-            elif method == 'çek' and check_status != 'odendi':
+            elif check_status == 'verildi':
                 status_text, status_class, counts = 'Çek Verildi', 'warning text-dark', False
                 expense_pending += amount
             else:
-                status_text, status_class, counts = 'Ödendi', 'success', True
-                expense_paid += amount
+                # No method and no check: we cannot say money left, so it is
+                # shown but not counted (same as the SQL above).
+                status_text, status_class, counts = 'Belirsiz', 'secondary', False
 
             expense_details.append({
                 'date': exp_date,
@@ -246,7 +299,51 @@ def cooperative_report(project_id, year, month):
                 'status_class': status_class,
                 'amount': amount,
                 'counts': counts,
+                'expense_amount': expense_amount,
             })
+
+        # An expense dated in this month must be visible even when nothing was
+        # paid for it this month. It is listed with 0 paid and counts for
+        # nothing in the paid totals. (An expense that already has a payment
+        # row this month is not listed twice.) Its amount is in the "recorded
+        # expenses" total below, and its unpaid part is in the commitment.
+        cur.execute("""
+            SELECT e.expense_date, e.title, s.name, e.description,
+                   {plan}
+            FROM expenses e
+            LEFT JOIN suppliers s ON e.supplier_id = s.id
+            {plan_join}
+            WHERE e.project_id = %s AND e.expense_date BETWEEN %s AND %s
+              AND NOT EXISTS (
+                  SELECT 1 FROM supplier_payments sp
+                  WHERE sp.expense_id = e.id
+                    AND sp.payment_date BETWEEN %s AND %s)
+        """.format(plan=PLAN_AMOUNT, plan_join=PLAN_JOIN),
+                    (project_id, start_date, end_date, start_date, end_date))
+        for exp_date, title, supplier_name, description, plan in cur.fetchall():
+            expense_details.append({
+                'date': exp_date,
+                'type': 'Büyük Gider',
+                'title': title,
+                'supplier': supplier_name or 'Belirtilmemiş',
+                'description': description,
+                'method': None,
+                'status_text': 'Ödenmedi',
+                'status_class': 'secondary',
+                'amount': Decimal(0),
+                'counts': False,
+                'expense_amount': plan,
+            })
+
+        # Everything recorded as an expense in this month, paid or not.
+        cur.execute("""
+            SELECT COALESCE(SUM({plan}), 0)
+            FROM expenses e
+            {plan_join}
+            WHERE e.project_id = %s AND e.expense_date BETWEEN %s AND %s
+        """.format(plan=PLAN_AMOUNT, plan_join=PLAN_JOIN),
+                    (project_id, start_date, end_date))
+        report_data['month_recorded_expenses'] = cur.fetchone()[0]
 
         # Petty cash is always money leaving the safe, so it always counts.
         cur.execute("""

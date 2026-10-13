@@ -13,12 +13,16 @@ Rules (the same ones the money code uses everywhere else):
 * Spent    = payments that really left (supplier_payments, the same rule as
   project_overview) + petty cash.
 * Committed = everything the expense plan says we will pay, minus what was
-  really paid. A check we handed over but that is not cashed yet is part of
-  this number: it closed nothing, so it is still owed. It is shown as a
+  really paid. The plan of an expense is the sum of its installments, or the
+  expense amount when it has no installments (expense_plan.py; the same rule
+  as the cooperative report and project_overview). A check we handed over
+  but that is not cashed yet is part of this number: it closed nothing, so
+  it is still owed. It is shown as a
   separate line so the user sees how much of the commitment is already
   "on paper", but it must never be added on top of the commitment.
-* Spent + Committed = the expense plan total + petty cash. That is the figure
-  the cooperative report shows as expense (expenses.amount + petty cash).
+* Spent + Committed = the expense plan total + petty cash. The cooperative
+  report shows the same two parts: "Bu ayki gider" is the paid part (same
+  source and rule as Spent) and "Kalan Taahhüt" is the Committed part.
 
 Why the reconcile functions are not called here: they UPDATE the schedule
 tables, and this screen must only read. The validity rule inside them
@@ -28,6 +32,8 @@ The stored expense_schedule.paid_amount is not used on purpose: it caps a
 payment at the plan, so an overpayment would disappear from it.
 """
 from decimal import Decimal
+
+from expense_plan import PLAN_AMOUNT, PLAN_JOIN
 
 ZERO = Decimal(0)
 
@@ -55,13 +61,7 @@ WHERE f.project_id = %s
 # One row. `per_expense` has one row per expense, so an overpaid expense can
 # be told apart from the rest.
 EXPENSE_SQL = """
-WITH planned AS (
-    SELECT es.expense_id, SUM(es.amount) AS planned
-    FROM expense_schedule es
-    JOIN expenses e ON es.expense_id = e.id
-    WHERE e.project_id = %s
-    GROUP BY es.expense_id
-), paid AS (
+WITH paid AS (
     SELECT sp.expense_id,
            COALESCE(SUM(sp.amount)
                     FILTER (WHERE sp.payment_method = 'nakit'
@@ -75,11 +75,11 @@ WITH planned AS (
     GROUP BY sp.expense_id
 ), per_expense AS (
     SELECT e.id,
-           COALESCE(pl.planned, 0) AS planned,
+           {plan_amount}           AS planned,
            COALESCE(pd.paid, 0)    AS paid,
            COALESCE(pd.handed, 0)  AS handed
     FROM expenses e
-    LEFT JOIN planned pl ON pl.expense_id = e.id
+    {plan_join}
     LEFT JOIN paid pd ON pd.expense_id = e.id
     WHERE e.project_id = %s
 )
@@ -93,7 +93,7 @@ SELECT
     (SELECT COALESCE(SUM(amount), 0)
        FROM petty_cash_expenses WHERE project_id = %s) AS petty_total
 FROM per_expense
-"""
+""".format(plan_amount=PLAN_AMOUNT, plan_join=PLAN_JOIN)
 
 
 def load_profitability(cur, project_id):
@@ -109,7 +109,8 @@ def load_profitability(cur, project_id):
     cur.execute(INCOME_SQL, (project_id, project_id))
     flat_count, sold_count, sold_total, collected = cur.fetchone()
 
-    cur.execute(EXPENSE_SQL, (project_id,) * 4)
+    # %s placeholders: paid, per_expense, petty total.
+    cur.execute(EXPENSE_SQL, (project_id,) * 3)
     (planned_total, paid_total, handed_total, overpaid_total, overpaid_count,
      petty_total) = cur.fetchone()
 

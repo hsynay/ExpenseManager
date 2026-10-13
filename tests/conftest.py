@@ -91,6 +91,16 @@ class Factory:
         """Make the rows visible to the application's own connection."""
         self.conn.commit()
 
+    def track(self, table, value, pk='id'):
+        """Remember a row that a route created, so cleanup deletes it too.
+
+        Rows made through the factory are tracked already. A row a route
+        inserts is not, and it would block the delete of its parent.
+        """
+        entry = (table, pk, value)
+        if entry not in self._created:
+            self._created.append(entry)
+
     def new_token(self):
         """A fresh submission token, removed again at the end of the test."""
         value = str(uuid.uuid4())
