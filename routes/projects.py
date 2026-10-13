@@ -7,6 +7,7 @@ from db import get_connection
 from datetime import date, datetime
 from decimal import Decimal
 from core import app
+from expense_plan import PLAN_AMOUNT, PLAN_JOIN
 from helpers import (
     log_audit, claim_submission_token, login_required, json_login_required,
     repair_out_of_range_dates,
@@ -504,7 +505,13 @@ def project_overview(project_id):
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM petty_cash_expenses WHERE project_id = %s", (project_id,))
         paid_petty_cash = cur.fetchone()[0]
         total_paid_expense = paid_large_expenses + paid_petty_cash
-        cur.execute("SELECT COALESCE(SUM(es.amount), 0) FROM expense_schedule es JOIN expenses e ON es.expense_id = e.id WHERE e.project_id = %s", (project_id,))
+        # The plan of an expense is its installments, or its amount when it
+        # has none (expense_plan.py: the same rule as the cooperative report
+        # and the profitability screen).
+        cur.execute(
+            "SELECT COALESCE(SUM({plan}), 0) FROM expenses e {plan_join} "
+            "WHERE e.project_id = %s".format(plan=PLAN_AMOUNT, plan_join=PLAN_JOIN),
+            (project_id,))
         total_planned_large_expense = cur.fetchone()[0]
         total_unpaid_expense = (total_planned_large_expense + paid_petty_cash) - total_paid_expense
 
@@ -580,17 +587,31 @@ def project_overview(project_id):
             )
             SELECT s.due_date, cei.amount, e.title, sup.name,
                    COALESCE(eps.total_cash, 0), COALESCE(eps.total_cleared_check, 0),
-                   COALESCE(eps.total_portfolio_check, 0), cei.cumulative_amount
+                   COALESCE(eps.total_portfolio_check, 0), cei.cumulative_amount,
+                   TRUE AS has_plan
             FROM expense_schedule s
             JOIN expenses e ON s.expense_id = e.id
             LEFT JOIN suppliers sup ON e.supplier_id = sup.id
             LEFT JOIN expense_payment_summary eps ON s.expense_id = eps.expense_id
             JOIN cumulative_expense_installments cei ON s.id = cei.id
             WHERE e.project_id = %s
+            UNION ALL
+            -- An expense with no installments at all is one open item for its
+            -- whole amount, dated on the expense date. Without this row it
+            -- would be in the unpaid total but not in the list.
+            SELECT e.expense_date, e.amount, e.title, sup.name,
+                   COALESCE(eps.total_cash, 0), COALESCE(eps.total_cleared_check, 0),
+                   COALESCE(eps.total_portfolio_check, 0), e.amount,
+                   FALSE AS has_plan
+            FROM expenses e
+            LEFT JOIN suppliers sup ON e.supplier_id = sup.id
+            LEFT JOIN expense_payment_summary eps ON e.id = eps.expense_id
+            WHERE e.project_id = %s
+              AND NOT EXISTS (SELECT 1 FROM expense_schedule x WHERE x.expense_id = e.id)
         """
-        cur.execute(expense_query, (project_id, project_id))
+        cur.execute(expense_query, (project_id, project_id, project_id))
         for row in cur.fetchall():
-            due_date, amount, title, sup_name, total_cash, total_cleared_check, total_portfolio_check, cumulative_amount = row
+            due_date, amount, title, sup_name, total_cash, total_cleared_check, total_portfolio_check, cumulative_amount, has_plan = row
             
             # Same rule as the income side: an expense installment is closed
             # only by money that really left, that is cash and outgoing checks
@@ -616,7 +637,7 @@ def project_overview(project_id):
                 status, status_class = ("Gecikmiş", "bg-danger") if due_date < today else ("Bekleniyor", "bg-secondary")
                 payment_method = None
                 
-            expense_items.append({'date': due_date, 'description': title, 'party': sup_name or "Belirtilmemiş", 'details': 'Planlı Gider', 'amount': amount, 'status': status, 'status_class': status_class, 'payment_method': payment_method})
+            expense_items.append({'date': due_date, 'description': title, 'party': sup_name or "Belirtilmemiş", 'details': 'Planlı Gider' if has_plan else 'Planlı Gider (taksit planı yok)', 'amount': amount, 'status': status, 'status_class': status_class, 'payment_method': payment_method})
 
         cur.execute("SELECT expense_date, title, amount, description FROM petty_cash_expenses WHERE project_id = %s", (project_id,))
         for expense_date, title, amount, desc in cur.fetchall():

@@ -53,6 +53,10 @@ by value, and `audit_logs` rows newer than the id the test started at.
 | `test_check_status_transitions.py` | `/check/update_status` for both check directions, and the effect on the debt |
 | `test_submission_tokens.py` | The double submit guard, as a helper and through a route |
 | `test_check_rule_on_pages.py` | The check rule as `project_overview` and the cooperative report apply it |
+| `test_bulk_supplier_payment.py` | `/supplier_payment/new`: one payment row per expense, schedule written only by reconcile, stale schedule not trusted, overpayment and refused amounts |
+| `test_schedule_drift.py` | Stale `expense_schedule`: the hand run SQL (`queries/schedule_drift_check.sql`), the `find_schedule_drift` detector, the warning on the expense card, the baseline guard `KNOWN_DRIFT`, and the "expenses without a plan" query |
+| `test_plan_rule.py` | One rule for "the plan of an expense" (installments, or the expense amount when there are none) on the cooperative report, the profitability screen and `project_overview`: same commitment, same plan total, same paid figure |
+| `test_coop_report_expenses.py` | The expense side of the cooperative report: real payments by payment date, check rule, carried balance, remaining commitment, tie to `project_overview` |
 | `test_pagination.py` | Page size, prev/next links, filters and sorting surviving a page turn, the two-list pages turning independently, totals staying whole |
 | `test_smoke.py` | Every GET route answers without a server error; login is required |
 
