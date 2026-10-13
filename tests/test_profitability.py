@@ -1,9 +1,12 @@
 """/project/<id>/profitability: the figures, the check rule and the tie to the
 cooperative report.
 
-The central rule: spent + committed must equal the expense figure of the
-cooperative report. The check below runs the real report page on a
-cooperative project and compares the two numbers.
+The central rule: "spent" must equal what the cooperative report shows as paid
+this month, and "committed" must equal its "remaining commitment" line. The
+checks below run the real report page on a cooperative project and compare the
+numbers. (The report used to show the plan total as one "expense" figure; it
+now shows the paid part and the commitment part separately, and the two add up
+to that same total.)
 """
 from decimal import Decimal
 
@@ -126,23 +129,31 @@ def test_unknown_project_returns_none(factory):
 # --- the tie to the cooperative report ---------------------------------------
 
 def report_expense(client, render_context, project_id):
+    """What the June 2026 report says: (paid this month, remaining commitment).
+
+    The report shows money that really left (payments by payment date) and,
+    separately, what is still to be paid. All dates in these scenarios are in
+    June, so the month holds everything.
+    """
     response = client.get('/reports/cooperative/%d/2026/6' % project_id)
     assert response.status_code == 200
     data = render_context.latest('coop_report.html')['report_data']
-    return data['current_expense'], data['expense_pending']
+    return data['current_expense'], data['remaining_commitment']
 
 
-def test_spent_plus_committed_equals_cooperative_report_expense(
-        factory, client, render_context):
+def test_report_matches_spent_and_committed(factory, client, render_context):
     scenario = build_scenario(factory)
     factory.commit()
 
     f = load_profitability(factory.cur, scenario['project_id'])
-    report_total, _ = report_expense(client, render_context,
-                                     scenario['project_id'])
+    paid, commitment = report_expense(client, render_context,
+                                      scenario['project_id'])
 
-    assert report_total == D('520000')
-    assert f['spent'] + f['committed'] == report_total
+    assert paid == f['spent'] == D('270000')
+    assert commitment == f['committed'] == D('250000')
+    # The plan plus petty cash: the same total the report used to show as
+    # "expense" before it was split into paid and still owed.
+    assert paid + commitment == f['total_cost'] == D('520000')
 
 
 def test_tie_holds_when_a_payment_exceeds_its_plan(factory, client,
@@ -160,11 +171,12 @@ def test_tie_holds_when_a_payment_exceeds_its_plan(factory, client,
     factory.commit()
 
     f = load_profitability(factory.cur, project_id)
-    report_total, _ = report_expense(client, render_context, project_id)
+    paid, commitment = report_expense(client, render_context, project_id)
 
     assert (f['overpaid_count'], f['overpaid_total']) == (1, D('150000'))
     assert f['spent'] == D('270000') and f['committed'] == D('30000')
-    assert f['spent'] + f['committed'] == report_total == D('300000')
+    assert (paid, commitment) == (f['spent'], f['committed'])
+    assert paid + commitment == D('300000')
 
 
 def test_the_page_warns_about_overpayment(factory, client, render_context):
