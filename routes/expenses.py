@@ -14,6 +14,9 @@ from helpers import (
     repair_out_of_range_dates,
 )
 from reconcile import reconcile_supplier_payments
+from schedule_drift import (
+    open_installments, allocate_payment, find_schedule_drift,
+)
 
 
 def _expense_children(cur, project_id):
@@ -95,8 +98,15 @@ def _petty_items(cur, project_id, title_filter, pc_sort, pc_order):
     return sorted(raw_petty, key=lambda x: (x[3], x[0]), reverse=is_reverse)
 
 
-def _build_expense_cards(expenses_raw, schedules_by_expense, payments_by_expense):
-    """One dict per expense with its installments, status labels and payments."""
+def _build_expense_cards(expenses_raw, schedules_by_expense, payments_by_expense,
+                         drift_by_expense=None):
+    """One dict per expense with its installments, status labels and payments.
+
+    drift_by_expense marks cards whose stored schedule does not match the
+    payments. It only adds a 'drift' entry for the page to show a warning; the
+    figures on the card are never changed by it.
+    """
+    drift_by_expense = drift_by_expense or {}
     expenses_data = []
     today = date.today()
     for expense_id_loop, title, total_amount, supplier_name, _supplier_id in expenses_raw:
@@ -106,6 +116,7 @@ def _build_expense_cards(expenses_raw, schedules_by_expense, payments_by_expense
             'expense_id': expense_id_loop, 'title': title, 'supplier_name': supplier_name or "-",
             'total_amount': total_amount, 'total_paid': total_paid_for_this_expense,
             'remaining_due': total_amount - total_paid_for_this_expense,
+            'drift': drift_by_expense.get(expense_id_loop),
             'installments': [],
             'payments': payments_by_expense.get(expense_id_loop, [])
         }
@@ -252,8 +263,21 @@ def list_expenses():
         total_paid_project = (total_paid_scheduled or Decimal(0)) + (total_petty_cash or Decimal(0))
         total_remaining_due = total_project_expense - total_paid_project
 
+        # A read only check: does the stored schedule match the payments? It
+        # only puts a warning on the card. If the check itself fails, the page
+        # still has to open, so the error is logged and the warning is skipped.
+        drift_by_expense = {}
+        try:
+            drift_by_expense = {d['expense_id']: d
+                                for d in find_schedule_drift(cur, project_id)}
+        except Exception:
+            conn.rollback()
+            app.logger.exception('Schedule drift check failed (project_id=%s)',
+                                 project_id)
+
         expenses_data = _build_expense_cards(
-            expenses_raw, schedules_by_expense, payments_by_expense)
+            expenses_raw, schedules_by_expense, payments_by_expense,
+            drift_by_expense)
 
     except Exception:
         app.logger.exception('Failed to list expenses (project_id=%s)',
@@ -447,50 +471,44 @@ def new_supplier_payment():
 
             payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d').date()
 
-            # Ödemeyi taksitlere dağıtma
-            amount_to_distribute = payment_amount
-            cur.execute("""
-                SELECT es.id, es.amount, es.paid_amount, es.expense_id
-                FROM expense_schedule es
-                JOIN expenses e ON es.expense_id = e.id
-                WHERE e.supplier_id = %s AND e.project_id = %s AND es.is_paid = FALSE
-                ORDER BY es.due_date ASC
-            """, (supplier_id, project_id))
-            
-            unpaid_installments = cur.fetchall()
+            # Spread the payment over the open installments of this supplier.
+            # "Open" comes from the real payments, not from the stored schedule
+            # (see schedule_drift.py). Every expense that gets a part also gets
+            # its own supplier_payments row, and its schedule is rebuilt by
+            # reconcile. This route never writes expense_schedule by hand.
+            if payment_amount <= 0:
+                raise ValidationError("Ödeme tutarı sıfırdan büyük olmalıdır.")
 
-            if not unpaid_installments:
+            open_rows = open_installments(cur, supplier_id, project_id)
+
+            if not open_rows:
                 flash("Bu tedarikçinin seçilen projeye ait ödenmemiş bir borcu bulunamadı.", "warning")
                 return redirect(url_for('new_supplier_payment'))
 
-            paid_expense_ids = set()
-            for inst_id, total_amount, paid_amount, expense_id in unpaid_installments:
-                if amount_to_distribute <= 0: break
-                
-                paid_expense_ids.add(expense_id)
-                remaining_due = total_amount - paid_amount
-                
-                if amount_to_distribute >= remaining_due:
-                    cur.execute("UPDATE expense_schedule SET paid_amount = %s, is_paid = TRUE WHERE id = %s", (total_amount, inst_id))
-                    amount_to_distribute -= remaining_due
-                else:
-                    new_paid_amount = paid_amount + amount_to_distribute
-                    cur.execute("UPDATE expense_schedule SET paid_amount = %s WHERE id = %s", (new_paid_amount, inst_id))
-                    amount_to_distribute = 0
-            
-            first_expense_id = list(paid_expense_ids)[0] if paid_expense_ids else None
-            
-            # Fiili ödemeyi supplier_payments tablosuna kaydet
-            cur.execute("""
-                INSERT INTO supplier_payments (expense_id, supplier_id, amount, payment_date, payment_method, description)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (first_expense_id, supplier_id, payment_amount, payment_date, 'nakit', description))
-            
+            allocations, surplus = allocate_payment(open_rows, payment_amount)
+            if surplus > 0:
+                # More than the open debt. As before, the payment is recorded
+                # in full: the extra goes on the expense of the last open
+                # installment (every open installment was filled by now).
+                allocations[open_rows[-1][1]] += surplus
+
+            for expense_id, part in allocations.items():
+                cur.execute("""
+                    INSERT INTO supplier_payments (expense_id, supplier_id, amount, payment_date, payment_method, description)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (expense_id, supplier_id, part, payment_date, 'nakit', description))
+                reconcile_supplier_payments(cur, expense_id)
+
             log_audit(cur, session.get('user_id'), 'supplier_payment_create', 'supplier_payment', None,
-                      {'supplier_id': supplier_id, 'project_id': project_id, 'amount': float(payment_amount), 'expense_ids': list(paid_expense_ids)})
+                      {'supplier_id': supplier_id, 'project_id': project_id, 'amount': float(payment_amount),
+                       'expense_ids': list(allocations),
+                       'allocations': {str(k): float(v) for k, v in allocations.items()}})
 
             conn.commit()
             flash(f'{format_thousands(payment_amount)} ₺ tutarındaki tedarikçi ödemesi kaydedildi ve borçlara yansıtıldı.', 'success')
+            if surplus > 0:
+                flash(f'Ödeme açık borcun {format_thousands(surplus)} ₺ üzerinde. '
+                      'Fazla tutar son giderin üzerine fazla ödeme olarak yazıldı.', 'warning')
             return redirect(url_for('list_expenses', project_id=project_id))
 
         except ValidationError as e:

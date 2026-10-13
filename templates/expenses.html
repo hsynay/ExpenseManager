@@ -168,6 +168,9 @@
     </div>
 
     <h4 class="mt-5 mb-3">Planlı Büyük Giderler (Tedarikçi Borçları)</h4>
+    {# A small warning when the stored payment plan does not match the payments.
+       It is only a mark: the figures next to it are shown exactly as stored. #}
+    {% macro drift_flag(expense) %}{% if expense.drift %}<span class="schedule-drift-flag text-warning ms-1" role="img" tabindex="0" aria-label="Ödeme planı ile ödemeler uyuşmuyor" title="Dikkat: {% if expense.drift.diff != 0 %}Bu giderin ödeme planında görünen ödenen tutar ({{ expense.drift.schedule_paid|thousands }} ₺), kayıtlı geçerli ödemelerle ({{ expense.drift.real_paid|thousands }} ₺) uyuşmuyor.{% else %}Bu giderin taksitlerindeki ödendi/ödenmedi durumu kayıtlı ödemelerle uyuşmuyor (toplam tutar aynı).{% endif %} Kartta görünen rakamlar ödeme planından okunur ve yanlış olabilir. Rakamlar değiştirilmedi; düzeltilmesi için yöneticiye haber verin."><i class="fa-solid fa-triangle-exclamation"></i></span>{% endif %}{% endmacro %}
     {% for expense in expenses_data %}
     <div class="card mb-4" id="exp-{{ expense.expense_id }}">
         <div class="card-header bg-light d-flex justify-content-between align-items-center flex-wrap">
@@ -188,8 +191,8 @@
         <div class="card-body p-4">
             <div class="row text-center mb-4 g-3">
                 <div class="col-md-4"><div class="p-3 border rounded-3"><h6 class="text-muted mb-1">Toplam Borç</h6><p class="h5 fw-bold mb-0 text-primary">{{ expense.total_amount|thousands }} ₺</p></div></div>
-                <div class="col-md-4"><div class="p-3 border rounded-3"><h6 class="text-muted mb-1">Toplam Ödenen</h6><p class="h5 fw-bold mb-0 text-success">{{ expense.total_paid|thousands }} ₺</p></div></div>
-                <div class="col-md-4"><div class="p-3 border rounded-3"><h6 class="text-muted mb-1">Kalan Borç</h6><p class="h5 fw-bold mb-0 text-danger">{{ expense.remaining_due|thousands }} ₺</p></div></div>
+                <div class="col-md-4"><div class="p-3 border rounded-3"><h6 class="text-muted mb-1">Toplam Ödenen{{ drift_flag(expense) }}</h6><p class="h5 fw-bold mb-0 text-success">{{ expense.total_paid|thousands }} ₺</p></div></div>
+                <div class="col-md-4"><div class="p-3 border rounded-3"><h6 class="text-muted mb-1">Kalan Borç{{ drift_flag(expense) }}</h6><p class="h5 fw-bold mb-0 text-danger">{{ expense.remaining_due|thousands }} ₺</p></div></div>
             </div>
             <div class="table-responsive">
                 <table class="table table-bordered table-hover align-middle table-sm">
