@@ -1,252 +1,241 @@
-# 🏗️ Construction Project Management System
+# ExpenseManager
 
-A modern and user-friendly web-based application to manage construction projects, customer payments, expense tracking, and financial summaries. This system helps construction companies track apartment sales, manage cooperative or standard project types, and monitor cash flow with clarity and ease.
+A finance and pre-accounting web application for construction companies and
+building cooperatives. It tracks apartment sales and customer instalments,
+supplier expenses, cheques, petty cash and monthly cooperative accounts, and
+answers three questions at any time: what has actually been paid, what is still
+owed, and what is expected to come in or go out next.
 
-<div align="center">
+It was written for a single construction company, which has used it for its
+real accounts. The user interface is in Turkish; the code, comments, tests and
+documentation are in English.
 
-![Dashboard Preview](SS_dashboard.png)
+## Features
 
----
+- **Projects**: a project is either a normal sales project or a cooperative;
+  flats are grouped by block and floor and can be assigned to customers.
+- **Income**: instalment plans per flat, cash and cheque payments, a printable
+  debt statement per flat, an income list with filters and Excel export.
+- **Expenses**: expenses with their own payment plans, suppliers, supplier
+  payments (one at a time or spread over several expenses), petty cash.
+- **Cheques**: incoming and outgoing cheques with a status workflow. A cheque
+  closes a debt only when it is marked as cleared (see
+  [Business rule](#the-cheque-rule)).
+- **Reports**: dashboard, monthly income/expense charts, a monthly report for
+  cooperatives (carried balance, paid, still owed), project overview, project
+  profitability.
+- **Forecasts** (read only): cash flow for 3/6/12 months by week, a cheque
+  calendar, and ageing of overdue instalments (0-30, 31-60, 61-90, 90+ days).
+- **Daily summary e-mail**, triggered by an external scheduler.
+- **Excel export** of the four list pages; filters and sorting carry over.
+- **Audit log** of record-changing actions.
 
-![Detail of Debts Preview](SS_debts.png)
+## Technology and why
 
----
+| Choice | Reason |
+|---|---|
+| Python 3.11, Flask 3 | Small, explicit and easy to read; one developer, one deployable process. |
+| PostgreSQL (hosted on Supabase, used only as a database) | Money data needs transactions and constraints. Supabase Auth, Storage and the data API are not used. |
+| **Raw SQL with psycopg2, no ORM** | Deliberate. Most screens are aggregations over several tables (payments against schedules, with a rule about cheques). Having the exact SQL in view made the numbers auditable and made it possible to count and tune queries. An ORM would hide the query count that mattered most here. |
+| **Modules instead of Blueprints** | Deliberate. Every route is `@app.route` on one shared app object, split into files by topic. Endpoint names stay plain function names, so `url_for('list_expenses')` did not change when the 4,600-line file was split. Blueprints would have meant renaming every `url_for` call in the templates for no gain at this size. |
+| Jinja2, Bootstrap 5, Chart.js, vanilla JS | Server-rendered pages. Filtering, sorting and paging happen in the backend, so a page and its Excel export share the same query code. |
+| Flask-WTF (CSRF), Flask-Limiter (login rate limit) | Standard, small, and enough for the threat model. |
+| gunicorn, one worker | The app runs on a free-tier host. The in-memory rate limiter and the connection pool are sized for a single worker. |
 
-![Detail of Reports Preview](SS_reports.png)
+Pinned dependencies are in `requirements.txt` (tested with Python 3.11.9).
 
+## Architecture
 
-[![Live Demo](https://img.shields.io/badge/🌐_Live_Demo-Render-blue?style=for-the-badge)](https://construction-project-i03m.onrender.com)
-[![Made with Flask](https://img.shields.io/badge/Made_with-Flask-green?style=for-the-badge&logo=flask)](https://flask.palletsprojects.com/)
-[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-blue?style=for-the-badge&logo=postgresql)](https://www.postgresql.org/)
+### Files
 
-</div>
+| Path | Role |
+|---|---|
+| `app.py` | Entry point (`gunicorn app:app`). Imports `routes` so every route registers. |
+| `core.py` | The Flask `app` object, configuration, CSRF, rate limiter, error handlers. |
+| `db.py` | Connection pool (`ThreadedConnectionPool`), stale-connection check, connect timeout. |
+| `helpers.py` | `login_required`, `safe_next`, date parsing, paging, audit logging, double-submit tokens. |
+| `reconcile.py` | Rebuilds instalment schedules from payments. The core of the money logic. |
+| `expense_plan.py` | One definition of "the plan of an expense", shared by three screens. |
+| `schedule_drift.py` | Read-only detector for stale schedules; also finds open instalments for bulk payments. |
+| `profitability.py`, `cashflow.py`, `check_calendar.py`, `overdue.py` | Read-only calculations behind the forecast and profitability screens. |
+| `daily_summary.py` | Builds and sends the daily e-mail through an HTTP mail API. |
+| `excel_export.py` | Workbook generation, with protection against formula injection. |
+| `routes/` | `auth`, `projects`, `income`, `expenses`, `checks`, `reports`, `exports`, `forecast`, `tasks`. |
+| `templates/`, `static/` | Jinja2 templates, static assets. |
+| `migrations/` | Numbered SQL files, applied by hand. |
+| `queries/` | Read-only diagnostic SQL, meant to be run by hand against production. |
+| `maintenance/` | One-off repair script (kept for the record). |
+| `tests/` | The test suite; see `tests/README.md`. |
+| `.github/workflows/backup.yml` | Daily database backup. |
 
----
+### How a request flows
 
-## 🚀 Live Demo
-
-🔗 **[View Application](https://construction-project-i03m.onrender.com)**  
-> _Note: It may take a few seconds to wake up if the service is idle._
-
----
-
-## 🛠️ Technologies
-
-<table>
-<tr>
-<td>
-
-**Backend**
-- ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) Flask
-- ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=flat&logo=postgresql&logoColor=white) Database
-- ![Werkzeug](https://img.shields.io/badge/Security-Werkzeug-red?style=flat) Security
-
-</td>
-<td>
-
-**Frontend**
-- ![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=flat&logo=html5&logoColor=white) 
-- ![Bootstrap](https://img.shields.io/badge/Bootstrap-563D7C?style=flat&logo=bootstrap&logoColor=white) CSS Framework
-- ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat&logo=javascript&logoColor=black)
-- ![Chart.js](https://img.shields.io/badge/Chart.js-FF6384?style=flat&logo=chart.js&logoColor=white)
-
-</td>
-</tr>
-</table>
-
-**Deployment & Tools**
-- 🚀 **Render.com** - Cloud Deployment
-- 🔒 **Werkzeug Security** - Password Hashing & Authentication
-- 📊 **Chart.js** - Interactive Charts
-- 🗄️ **psycopg2** - PostgreSQL Adapter
-
----
-
-## ✨ Features
-
-<table>
-<tr>
-<td width="50%">
-
-### 👤 User Management
-- 🔐 Secure login system
-- 🔑 Encrypted password storage
-- 👥 Multi-user support
-
-### 📁 Project Management
-- 🏢 Normal & Cooperative project types
-- 🏠 Apartment allocation & floor/block tracking
-- 📋 Project status monitoring
-
-### 💰 Financial Tracking
-- 💸 Customer payment tracking
-- 📅 Manual or scheduled installments
-- 💳 Cash & check management
-
-</td>
-<td width="50%">
-
-### 📊 Reporting & Analytics
-- 📈 Monthly financial overview
-- 📊 Income & expense charts
-- 📋 Detailed payment reports
-
-### ⚠️ Alert System
-- 🔔 Overdue payments
-- ⏰ Upcoming payment reminders
-- 📢 Automatic notifications
-
-### 🛠️ Admin Panel
-- 👥 Customer management
-- 🏗️ Project management
-- 🏪 Supplier management
-
-</td>
-</tr>
-</table>
-
----
-
-## 🚀 Installation & Setup
-
-### Prerequisites
-- Python 3.8+
-- PostgreSQL
-- Git
-
-### 1️⃣ Clone the Repository
-
-```bash
-git clone https://github.com/hsynay/konak.git
-cd konak
+```
+browser -> host proxy (TLS) -> gunicorn -> Flask app (core.py)
+        -> ProxyFix (real client address)
+        -> CSRF check on POST
+        -> route function (routes/*.py), wrapped by @login_required
+        -> get_connection(): a pooled psycopg2 connection
+        -> parameterised SQL, business rules in Python
+        -> Jinja2 template -> HTML
 ```
 
-### 2️⃣ Create Virtual Environment
+A connection is returned to the pool when the route calls `close()`; a
+teardown hook returns any that a request forgot, and a returned connection is
+always rolled back first.
 
-```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
+### How money moves
 
-# Linux/macOS
-python -m venv venv
-source venv/bin/activate
+Payments are the source of truth. The instalment tables are derived from them:
+
+```
+payments / supplier_payments         (what really happened)
+        |
+        |  reconcile_customer_payments / reconcile_supplier_payments
+        |  (after every payment, cheque status change and plan edit)
+        v
+installment_schedule / expense_schedule   (derived: paid_amount, is_paid)
 ```
 
-### 3️⃣ Install Dependencies
+Reconcile clears the schedule and spreads the valid total over the instalments,
+oldest due date first. Read-only screens never call it; they repeat the same
+rule in SQL, and tests run both side by side so they cannot drift apart.
+
+### The cheque rule
+
+A cheque closes a debt only after it has been marked by hand: an incoming
+cheque as cleared, an outgoing cheque as paid. The due date is information
+only. A cheque still in the portfolio, or handed over but not yet paid, is
+shown but counted nowhere; a bounced cheque is counted nowhere at all.
+Forecast screens are the one exception: there, a pending cheque is treated as
+money expected on its due date, because they show expectations, not facts.
+
+### Data model
+
+Sixteen tables: `users`, `customers`, `projects`, `flats`; income side
+`installment_schedule`, `payments`, `checks`; expense side `suppliers`,
+`expenses`, `expense_schedule`, `supplier_payments`, `outgoing_checks`,
+`petty_cash_expenses`; and `cooperative_monthly_summary`, `audit_logs`,
+`submission_tokens`.
+
+## Security
+
+- Passwords are stored as Werkzeug hashes; the session secret comes from the
+  environment and the app refuses to start without it.
+- Session cookie: `HttpOnly`, `SameSite=Lax`, `Secure` in production, 12 hour
+  lifetime.
+- CSRF protection on every POST, including `fetch()` calls (header token).
+- Login rate limit of 10 failed attempts per minute per client address, using
+  the real address behind the proxy.
+- Redirect targets after login are validated; addresses outside the site are
+  dropped (no open redirect).
+- All SQL values are query parameters. The few dynamic parts (sort columns)
+  come from fixed whitelists. Template autoescaping is on.
+- Exception details are logged, never shown to the user.
+- Date inputs are bounded at the source (a stray year such as 22026 once made
+  pages fail), and money columns have fixed precision and `CHECK` constraints
+  on status values.
+- Record-creating forms carry a one-time token claimed in the same transaction
+  as the record, so a double click cannot create two records.
+- The scheduled-job endpoint is protected by a secret token (compared in
+  constant time) and its own rate limit, and refuses everything when no token
+  is configured.
+- Excel export neutralises cells that begin with `=`.
+- Outgoing HTTP calls and database connections have timeouts, so one slow
+  dependency cannot hold the single worker.
+
+## Tests
+
+**354 tests**, run against a real PostgreSQL test database rather than mocks.
+
+```
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+What they protect:
+
+- the reconcile functions and the cheque rule, including on every page that
+  applies it (project overview, cooperative report, debt statement);
+- plan rewriting and redistribution, bulk supplier payments, double-submit
+  protection;
+- agreement between screens: the cooperative report, the profitability screen
+  and the project overview must give the same paid and still-owed figures;
+- a watch over stale schedules, and a smoke test that every GET route answers.
+
+Safety: before anything runs, a session fixture looks for a marker project in
+the database and stops the whole run if it is missing, so a wrong `.env` cannot
+reach production data. Tests only delete rows they created themselves (named
+with a `PYTEST ` prefix). More detail, and what is not covered (CSRF, the login
+form, the rate limit), is in [tests/README.md](tests/README.md).
+
+The suite is slow (about 13 minutes) because every test talks to a remote
+database.
+
+## Setup
+
+Requirements: Python 3.11 and a PostgreSQL database.
 
 ```bash
+git clone <repository-url>
+cd <repository-folder>
+
+python -m venv venv
+venv\Scripts\activate            # Windows
+# source venv/bin/activate       # Linux / macOS
+
 pip install -r requirements.txt
+cp .env.example .env             # then fill in the values
 ```
 
-### 4️⃣ Configure Environment Variables
+In `.env`:
+
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`: your database.
+- `SECRET_KEY`: a long random string, for example
+  `python -c "import secrets; print(secrets.token_hex(32))"`.
+- `SESSION_COOKIE_SECURE=false` for local `http`.
+- `TASK_TOKEN`, `BREVO_API_KEY`, `MAIL_FROM`, `MAIL_TO`: only for the daily
+  e-mail; without them the job simply skips sending.
+
+Database: create the tables (see [Limitations](#limitations)), apply the files
+in `migrations/` in order with `psql -f`, and insert a first user with a
+password hash from `werkzeug.security.generate_password_hash`.
 
 ```bash
-# Create .env file
-cp .env.example .env
-
-# Edit .env file
-DATABASE_URL=postgresql://username:password@localhost/dbname
-SECRET_KEY=your_secret_key_here
+python app.py                    # development server with debug on
 ```
 
-### 5️⃣ Run the Application
+## Deployment
 
-```bash
-flask run
-```
+- **Host**: Render, started with `gunicorn app:app` on a single worker. A
+  scheduler pings `/ping` to keep the free instance awake and calls
+  `/tasks/daily-summary` once a day with the task token.
+- **Database**: Supabase Postgres through the session pooler (port 5432), which
+  the connection pool needs.
+- **Backups**: a GitHub Actions workflow dumps the `public` schema every day
+  at 02:00 UTC and keeps the file as an artifact for 30 days. A second, full
+  dump is attempted on a best-effort basis.
+- **Mail**: sent through an HTTP mail API, because the free host blocks
+  outgoing SMTP ports.
+- **Migrations** are plain SQL, applied by hand; there is no migration tool.
 
-🎉 The application will start running at `http://localhost:5000`!
+## Limitations
 
----
+Stated plainly, for anyone evaluating the project:
 
-## 📸 Screenshots
+- The base schema is not in the repository. `migrations/` holds only the
+  changes made after the first version, so a fresh database cannot be built
+  from the repository alone yet.
+- No continuous integration for the test suite; it needs a populated test
+  database with the marker project.
+- The login rate limiter and the connection pool live in memory, which is
+  correct for one worker only.
+- All users currently share one login, so the audit log cannot tell who made a
+  change. Per-user roles are not implemented.
+- The application sets no security headers (CSP, HSTS) itself; transport
+  security is left to the host.
+- Receipt uploads, customer-facing statements and server-side PDF generation
+  are not implemented.
 
-<details>
-<summary>📊 Dashboard</summary>
-
-- Project summaries
-- Financial charts
-- Quick access menus
-
-</details>
-
-<details>
-<summary>💰 Payment Tracking</summary>
-
-- Customer debt status
-- Installment plans
-- Payment history
-
-</details>
-
-<details>
-<summary>📈 Reports</summary>
-
-- Monthly income-expense reports
-- Project-based analysis
-- Check tracking system
-
-</details>
-
----
-
-## 🗂️ Project Structure
-
-```
-odeme-takip/
-├── app.py                 # Main Flask application
-├── templates/            # HTML templates
-│   ├── dashboard.html
-│   ├── debts.html
-│   └── ...
-├── static/              # CSS, JS, images
-├── requirements.txt     # Python dependencies
-├── .env.example        # Environment variables template
-└── README.md
-```
-
----
-
-## 🔧 Configuration
-
-Create a `.env` file in the root directory:
-
-```env
-DATABASE_URL=postgresql://username:password@localhost:5432/dbname
-SECRET_KEY=your-secret-key-here
-FLASK_ENV=development
-```
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Please follow these steps:
-
-1. Fork this repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
-## 📞 Contact & Support
-
-<div align="center">
-
-**🧑‍💻 Developer: Hüseyin Ay**
-
-[![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/hsynay)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/h%C3%BCseyin-ay01)
-
-📧 **Email:** huseyin_1153@hotmail.com  
-
-</div>
-
----
-
-<div align="center">
-
-**⭐ If you like this project, don't forget to give it a star**
+See [docs/engineering-notes.md](docs/engineering-notes.md) for how the code got
+to its current shape.
